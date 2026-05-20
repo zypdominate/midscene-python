@@ -1,0 +1,13 @@
+{
+  "name": "midscene-android-service",
+  "version": "0.1.0",
+  "description": "Local JSON-RPC bridge service for midscene-android Python package",
+  "main": "service.js",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@midscene/android": "latest"
+  }
+}

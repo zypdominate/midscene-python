@@ -1,0 +1,18 @@
+# Node 二进制（体积大，不提交 git，由开发者脚本下载后打包进 wheel）
+midscene_android/_runtime/bin/node-*
+midscene_android/_runtime/npm/
+
+# Python 构建产物
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 用户缓存（运行时生成）
+~/.midscene_android/
+
+# IDE
+.vscode/
+.idea/

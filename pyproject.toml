@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "midscene-android"
+version = "0.1.0"
+description = "AI-powered Android automation via Midscene.js, bridged into Python"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["android", "automation", "testing", "ai", "midscene"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+]
+# 故意保持零依赖：只用标准库，降低用户环境冲突风险
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock",
+    "build",
+    "twine",
+]
+
+[project.scripts]
+# 预留 CLI 入口，方便未来扩展（如手动触发 npm install）
+midscene-android = "midscene_android.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["midscene_android*"]
+
+[tool.setuptools.package-data]
+midscene_android = [
+    # 各平台 Node 可执行文件
+    "_runtime/bin/node-linux-x64",
+    "_runtime/bin/node-linux-arm64",
+    "_runtime/bin/node-darwin-x64",
+    "_runtime/bin/node-darwin-arm64",
+    "_runtime/bin/node-win32-x64.exe",
+    # Node.js 服务代码
+    "_node_service/package.json",
+    "_node_service/service.js",
+]
