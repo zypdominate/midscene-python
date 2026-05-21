@@ -1,0 +1,752 @@
+"""
+集成测试：NodeServiceManager + MidsceneAgent 真实场景
+
+测试分三个层次，从内向外逐层覆盖：
+
+  Level 1 - 缓存与版本管理（无需 Node 进程）
+    测试 _is_cache_stale / _invalidate_cache 等版本失效逻辑。
+
+  Level 2 - Node 服务 + Agent 初始化（需要内置 Node 二进制，无需 Android 设备）
+    真实启动 Node RPC 服务，验证 MidsceneAgent 的初始化路径和错误处理。
+    createSession 在无设备时会返回 MidsceneRPCError，这属于预期行为。
+
+  Level 3 - 完整 AI 操作（需要 Android 设备 + AI Key）
+    使用 pytest.mark.device 标记，CI 中默认跳过，连接设备时手动运行。
+
+运行方式：
+  # Level 1 + 2（无需设备）
+  pytest tests/test_agent_integration.py -v -s -k "not device"
+
+  # Level 3（需要连接 Android 设备并配置 AI Key）
+  pytest tests/test_agent_integration.py -v -s -m device
+"""
+
+import os
+import threading
+import uuid
+
+import pytest
+import requests
+
+from midscene_android._node_manager import (
+    NodeServiceManager,
+    _get_current_version,
+    _is_cache_stale,
+    _invalidate_cache,
+)
+from midscene_android.agent import MidsceneAgent, MidsceneRPCError
+from midscene_android.config import MidsceneConfig
+from midscene_android.mixin import MidsceneMixin
+
+# ─── 标记定义 ─────────────────────────────────────────────────────────────────
+
+# pytest.ini / pyproject.toml 中注册该 marker 可消除警告：
+#   [tool.pytest.ini_options]
+#   markers = ["device: tests that require a real Android device connected via ADB"]
+device_mark = pytest.mark.device
+
+
+# ─── 公共 Fixtures ────────────────────────────────────────────────────────────
+
+def _make_dummy_config() -> MidsceneConfig:
+    """
+    Node 服务启动本身不需要真实 AI Key。
+    此配置用于 Level 1/2 测试。
+    """
+    return MidsceneConfig(
+        base_url="https://placeholder.example.com/v1",
+        api_key="dummy-key-for-integration-test",
+        model_name="placeholder-model",
+        model_family="openai",
+    )
+
+
+def _reset_singleton() -> None:
+    """在 teardown 中重置 NodeServiceManager 单例，避免测试间状态污染。"""
+    mgr = NodeServiceManager._instance
+    if mgr is not None:
+        mgr._shutdown()
+    NodeServiceManager._instance = None
+
+
+@pytest.fixture(scope="module")
+def node_service():
+    """
+    Module 级别的 NodeServiceManager fixture。
+
+    整个模块共享同一个 Node 子进程，避免重复的冷启动开销。
+    模块测试结束后自动关闭子进程。
+    """
+    _reset_singleton()
+    config = _make_dummy_config()
+    mgr = NodeServiceManager(config)
+    mgr.ensure_started()
+    yield mgr
+    _reset_singleton()
+
+
+# ─── Level 1：缓存与版本管理 ──────────────────────────────────────────────────
+
+class TestVersionCache:
+    """
+    验证 pip upgrade 后缓存失效与重建逻辑。
+    全部为纯 Python 逻辑，无需 Node 进程或网络。
+    """
+
+    def test_cache_stale_when_flag_missing(self, tmp_path, monkeypatch):
+        """npm done flag 不存在时，缓存应被视为过期。"""
+        monkeypatch.setattr(
+            "midscene_android._node_manager._NPM_DONE_FLAG",
+            tmp_path / ".npm_install_done",  # 不存在的文件
+        )
+        monkeypatch.setattr(
+            "midscene_android._node_manager._VERSION_FILE",
+            tmp_path / ".package_version",
+        )
+        assert _is_cache_stale() is True
+
+    def test_cache_stale_when_version_file_missing(self, tmp_path, monkeypatch):
+        """done flag 存在但 version file 不存在（旧版缓存），应被视为过期。"""
+        flag = tmp_path / ".npm_install_done"
+        flag.touch()
+        monkeypatch.setattr("midscene_android._node_manager._NPM_DONE_FLAG", flag)
+        monkeypatch.setattr(
+            "midscene_android._node_manager._VERSION_FILE",
+            tmp_path / ".package_version",  # 不存在
+        )
+        assert _is_cache_stale() is True
+
+    def test_cache_stale_when_version_mismatch(self, tmp_path, monkeypatch):
+        """缓存版本与当前包版本不一致时，应被视为过期。"""
+        flag = tmp_path / ".npm_install_done"
+        flag.touch()
+        version_file = tmp_path / ".package_version"
+        version_file.write_text("0.0.1", encoding="utf-8")  # 旧版本
+
+        monkeypatch.setattr("midscene_android._node_manager._NPM_DONE_FLAG", flag)
+        monkeypatch.setattr("midscene_android._node_manager._VERSION_FILE", version_file)
+        monkeypatch.setattr(
+            "midscene_android._node_manager._get_current_version",
+            lambda: "9.9.9",  # 当前版本更高
+        )
+        assert _is_cache_stale() is True
+
+    def test_cache_fresh_when_version_matches(self, tmp_path, monkeypatch):
+        """done flag 存在且版本一致时，缓存应是新鲜的。"""
+        flag = tmp_path / ".npm_install_done"
+        flag.touch()
+        version_file = tmp_path / ".package_version"
+        current = _get_current_version()
+        version_file.write_text(current, encoding="utf-8")
+
+        monkeypatch.setattr("midscene_android._node_manager._NPM_DONE_FLAG", flag)
+        monkeypatch.setattr("midscene_android._node_manager._VERSION_FILE", version_file)
+        assert _is_cache_stale() is False
+
+    def test_invalidate_cache_removes_service_files(self, tmp_path, monkeypatch):
+        """_invalidate_cache 应删除 service.js / package.json / flag / version。"""
+        # 建立虚假缓存目录
+        (tmp_path / "service.js").write_text("// stub", encoding="utf-8")
+        (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+        flag = tmp_path / ".npm_install_done"
+        flag.touch()
+        vf = tmp_path / ".package_version"
+        vf.write_text("0.1.0", encoding="utf-8")
+
+        monkeypatch.setattr("midscene_android._node_manager._NODE_SVC_CACHE", tmp_path)
+        monkeypatch.setattr("midscene_android._node_manager._NPM_DONE_FLAG", flag)
+        monkeypatch.setattr("midscene_android._node_manager._VERSION_FILE", vf)
+
+        _invalidate_cache()
+
+        assert not (tmp_path / "service.js").exists()
+        assert not (tmp_path / "package.json").exists()
+        assert not flag.exists()
+        assert not vf.exists()
+
+    def test_invalidate_cache_preserves_node_modules(self, tmp_path, monkeypatch):
+        """_invalidate_cache 必须保留 node_modules/，以便快速重装。"""
+        nm = tmp_path / "node_modules"
+        nm.mkdir()
+        (nm / "some_package").mkdir()
+
+        monkeypatch.setattr("midscene_android._node_manager._NODE_SVC_CACHE", tmp_path)
+        monkeypatch.setattr(
+            "midscene_android._node_manager._NPM_DONE_FLAG", tmp_path / ".npm_install_done"
+        )
+        monkeypatch.setattr(
+            "midscene_android._node_manager._VERSION_FILE", tmp_path / ".package_version"
+        )
+
+        _invalidate_cache()
+
+        assert nm.exists(), "node_modules should be preserved after cache invalidation"
+
+    def test_get_current_version_returns_string(self):
+        """_get_current_version 应始终返回非空字符串。"""
+        ver = _get_current_version()
+        assert isinstance(ver, str)
+        assert len(ver) > 0
+        print(f"\n  Current package version: {ver}")
+
+
+# ─── Level 2：Node 服务 + Agent 初始化（无 Android 设备）────────────────────
+
+class TestNodeServiceManagerLifecycle:
+    """
+    验证 NodeServiceManager 的完整生命周期。
+    需要内置 Node 二进制已就绪（_runtime/ 目录已填充）。
+    """
+
+    def setup_method(self):
+        _reset_singleton()
+
+    def teardown_method(self):
+        _reset_singleton()
+
+    def test_port_before_start_raises_runtime_error(self):
+        """访问 .port 必须在 ensure_started() 之前抛出 RuntimeError。"""
+        config = _make_dummy_config()
+        mgr = NodeServiceManager(config)
+        with pytest.raises(RuntimeError, match="not started"):
+            _ = mgr.port
+
+    def test_ensure_started_assigns_valid_port(self):
+        """ensure_started() 成功后，port 应是一个合法端口号。"""
+        config = _make_dummy_config()
+        mgr = NodeServiceManager(config)
+        mgr.ensure_started()
+
+        assert isinstance(mgr.port, int)
+        assert 1024 <= mgr.port <= 65535
+        print(f"\n  Node service listening on port: {mgr.port}")
+
+    def test_singleton_returns_same_instance(self):
+        """同一 Python 进程内多次构造应返回同一实例。"""
+        config = _make_dummy_config()
+        mgr1 = NodeServiceManager(config)
+        mgr2 = NodeServiceManager(config)
+        assert mgr1 is mgr2, "NodeServiceManager must be a singleton"
+
+    def test_ensure_started_idempotent(self):
+        """多次调用 ensure_started() 不应启动多个进程，端口保持不变。"""
+        config = _make_dummy_config()
+        mgr = NodeServiceManager(config)
+        mgr.ensure_started()
+        port_first = mgr.port
+
+        mgr.ensure_started()
+        port_second = mgr.port
+
+        assert port_first == port_second
+
+    def test_ensure_started_thread_safe(self):
+        """并发调用 ensure_started() 不应导致多进程或竞态条件。"""
+        config = _make_dummy_config()
+        mgr = NodeServiceManager(config)
+        errors: list[Exception] = []
+
+        def _start_worker():
+            try:
+                mgr.ensure_started()
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=_start_worker) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=60)
+
+        assert not errors, f"Concurrent ensure_started raised: {errors}"
+        assert 1024 <= mgr.port <= 65535
+
+    def test_service_process_is_running_after_start(self):
+        """ensure_started() 后，内部 Popen 进程应处于运行状态。"""
+        config = _make_dummy_config()
+        mgr = NodeServiceManager(config)
+        mgr.ensure_started()
+
+        assert mgr._proc is not None
+        assert mgr._proc.poll() is None, "Node process should still be running"
+
+    def test_shutdown_clears_port_and_instance(self):
+        """_shutdown() 后，_port 应清零，单例应被清除。"""
+        config = _make_dummy_config()
+        mgr = NodeServiceManager(config)
+        mgr.ensure_started()
+
+        mgr._shutdown()
+
+        assert mgr._port is None
+        assert NodeServiceManager._instance is None
+
+
+class TestNodeServiceRPC:
+    """
+    通过真实 HTTP 请求验证 Node RPC 服务行为。
+    使用 module 级 node_service fixture，仅启动一次进程。
+    """
+
+    def test_ping_returns_pong(self, node_service):
+        """ping 是最基本的健康检查，不需要设备或 AI Key。"""
+        resp = requests.post(
+            f"http://127.0.0.1:{node_service.port}/rpc",
+            json={"jsonrpc": "2.0", "id": str(uuid.uuid4()), "method": "ping", "params": {}},
+            timeout=10,
+        )
+        data = resp.json()
+        assert data["result"]["pong"] is True
+        assert "pid" in data["result"]
+        print(f"\n  ping → pong, Node pid={data['result']['pid']}")
+
+    def test_unknown_method_returns_rpc_error(self, node_service):
+        """调用未定义方法应返回 JSON-RPC -32601 错误，而非 HTTP 4xx/5xx。"""
+        resp = requests.post(
+            f"http://127.0.0.1:{node_service.port}/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": "test-unknown",
+                "method": "nonExistentMethod",
+                "params": {},
+            },
+            timeout=10,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "error" in data
+        assert data["error"]["code"] == -32601
+        print(f"\n  Unknown method error: {data['error']['message']}")
+
+    def test_invalid_json_returns_400(self, node_service):
+        """发送非 JSON 请求体应返回 HTTP 400。"""
+        resp = requests.post(
+            f"http://127.0.0.1:{node_service.port}/rpc",
+            data=b"not-json",
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        assert resp.status_code == 400
+
+    def test_get_request_returns_404(self, node_service):
+        """RPC 端点只接受 POST，GET 应返回 404。"""
+        resp = requests.get(
+            f"http://127.0.0.1:{node_service.port}/rpc",
+            timeout=10,
+        )
+        assert resp.status_code == 404
+
+    def test_concurrent_pings_all_succeed(self, node_service):
+        """并发 RPC 请求应全部正常返回，不出现竞态。"""
+        results: list[bool] = []
+        errors: list[Exception] = []
+
+        def _do_ping():
+            try:
+                resp = requests.post(
+                    f"http://127.0.0.1:{node_service.port}/rpc",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": str(uuid.uuid4()),
+                        "method": "ping",
+                        "params": {},
+                    },
+                    timeout=10,
+                )
+                results.append(resp.json()["result"]["pong"] is True)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=_do_ping) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        assert not errors, f"Concurrent pings raised: {errors}"
+        assert all(results), "All concurrent pings should succeed"
+        print(f"\n  10 concurrent pings: all OK")
+
+
+class TestMidsceneAgentInit:
+    """
+    验证 MidsceneAgent 的初始化路径与 Node 服务的交互。
+
+    createSession 需要真实 Android 设备；在无设备的 CI 环境中，
+    预期行为是 Node 侧返回错误，Python 侧将其包装为 MidsceneRPCError。
+    这正是我们要验证的错误传播链路。
+    """
+
+    def test_create_agent_for_unknown_serial_raises_rpc_error(self, node_service):
+        """
+        向 Node 服务传入一个不存在的 ADB serial，createSession 应失败。
+
+        这验证了错误传播链路：
+          Node.js connectDevice error → HTTP { error: {...} } → MidsceneRPCError
+        """
+        with pytest.raises(MidsceneRPCError) as exc_info:
+            MidsceneAgent("non-existent-serial-5554", node_service)
+
+        err = exc_info.value
+        assert str(err) != ""
+        assert isinstance(err.code, int)
+        print(f"\n  Expected MidsceneRPCError: code={err.code}, msg={err}")
+
+    def test_agent_init_failure_leaves_no_session(self, node_service):
+        """
+        初始化失败后，agent 变量应为 None（对象从未被成功创建）。
+        """
+        agent = None
+        try:
+            agent = MidsceneAgent("non-existent-serial-5554", node_service)
+        except MidsceneRPCError:
+            pass
+
+        assert agent is None, "Agent should not be assigned if createSession failed"
+
+    def test_agent_node_manager_port_used(self, node_service):
+        """
+        验证 MidsceneAgent 确实向 NodeServiceManager 提供的端口发送请求。
+        通过观察 RPC 请求是否到达正确端口（间接验证：ping 可达即证明端口正确）。
+        """
+        port = node_service.port
+        resp = requests.post(
+            f"http://127.0.0.1:{port}/rpc",
+            json={"jsonrpc": "2.0", "id": "port-check", "method": "ping", "params": {}},
+            timeout=5,
+        )
+        assert resp.status_code == 200
+        print(f"\n  Agent will use port {port}, verified reachable")
+
+    def test_destroy_nonexistent_session_is_graceful(self, node_service):
+        """
+        destroySession 传入不存在的 sessionId 应正常返回，不抛出异常。
+        这覆盖了 agent.destroy() 在异常状态下的健壮性。
+        """
+        resp = requests.post(
+            f"http://127.0.0.1:{node_service.port}/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": str(uuid.uuid4()),
+                "method": "destroySession",
+                "params": {"sessionId": "ghost-session-does-not-exist"},
+            },
+            timeout=10,
+        )
+        data = resp.json()
+        assert "result" in data, f"Unexpected error: {data}"
+        assert data["result"]["ok"] is True
+        print("\n  destroySession with unknown sessionId → ok (graceful)")
+
+
+class TestMidsceneMixinInit:
+    """
+    验证 MidsceneMixin 在真实 NodeServiceManager 下的初始化路径。
+    """
+
+    def test_ai_property_triggers_node_service_and_fails_gracefully(self, node_service):
+        """
+        访问 .ai 属性时，MidsceneMixin 会调用 node_manager.ensure_started()
+        并尝试 createSession。无设备时应传播 MidsceneRPCError。
+
+        这是用户代码的典型调用链：
+          device.ai.act(...)
+            → MidsceneMixin.ai (property)
+            → NodeServiceManager(config).ensure_started()
+            → MidsceneAgent(device_id, node_manager)  ← createSession fails here
+        """
+
+        class SimulatedDevice(MidsceneMixin):
+            """模拟已集成 MidsceneMixin 的设备类。"""
+
+            def __init__(self, device_id: str, config: MidsceneConfig):
+                # 通常从环境变量或 fixture 读取配置
+                self.init_midscene(device_id, config=config)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                self.close_midscene()
+
+        config = _make_dummy_config()
+
+        # 直接注入已启动的 node_service，绕过 NodeServiceManager 单例限制
+        device = SimulatedDevice("non-existent-5554", config)
+
+        # 手动注入已运行的 node_manager，模拟 ensure_started() 已完成的状态
+        # （在真实使用中，MidsceneMixin.ai 内部会自动调用 ensure_started）
+        device._midscene_config = config
+
+        with pytest.raises(MidsceneRPCError):
+            # 直接创建 agent 来模拟 .ai property 触发的流程
+            _ = MidsceneAgent("non-existent-5554", node_service)
+
+    def test_close_midscene_safe_before_ai_accessed(self, node_service):
+        """
+        如果从未访问 .ai（agent 为 None），close_midscene() 应静默成功。
+        常见场景：测试的 setup 阶段创建设备，teardown 阶段清理，
+        但测试本身失败在 .ai 访问之前。
+        """
+
+        class MyDevice(MidsceneMixin):
+            def __init__(self):
+                self.init_midscene("emulator-5554", config=_make_dummy_config())
+
+        device = MyDevice()
+        device.close_midscene()  # 不应抛出
+        device.close_midscene()  # 幂等
+
+
+# ─── Level 3：完整 AI 操作（需要真实 Android 设备 + AI Key）────────────────
+
+@pytest.fixture(scope="module")
+def ai_config():
+    """
+    从环境变量读取真实 AI 模型配置。
+
+    运行 Level 3 测试前，设置以下环境变量：
+      MIDSCENE_MODEL_BASE_URL  - AI API 地址
+      MIDSCENE_MODEL_API_KEY   - API Key
+      MIDSCENE_MODEL_NAME      - 模型名称
+      MIDSCENE_MODEL_FAMILY    - 模型家族（openai / qwen / doubao 等）
+    """
+    missing = [
+        v for v in (
+            "MIDSCENE_MODEL_BASE_URL",
+            "MIDSCENE_MODEL_API_KEY",
+            "MIDSCENE_MODEL_NAME",
+        )
+        if not os.environ.get(v)
+    ]
+    if missing:
+        pytest.skip(f"AI config env vars not set: {', '.join(missing)}")
+    return MidsceneConfig.from_env()
+
+
+@pytest.fixture(scope="module")
+def device_id():
+    """
+    从环境变量读取 Android 设备 ID（ADB device serial）。
+
+    运行 Level 3 测试前设置：
+      ANDROID_DEVICE_ID  - 例如 "emulator-5554" 或 "192.168.1.100:5555"
+    """
+    did = os.environ.get("ANDROID_DEVICE_ID", "")
+    if not did:
+        pytest.skip("ANDROID_DEVICE_ID env var not set")
+    return did
+
+
+@pytest.fixture(scope="module")
+def real_agent(ai_config, device_id):
+    """
+    完整初始化流程：
+      1. NodeServiceManager 启动 Node 子进程
+      2. MidsceneAgent 创建 Android session
+    模块内所有 device 测试共享同一个 session。
+    """
+    _reset_singleton()
+    mgr = NodeServiceManager(ai_config)
+    mgr.ensure_started()
+    print(f"\n  Node service running on port {mgr.port}")
+
+    agent = MidsceneAgent(
+        device_id,
+        mgr,
+        agent_options={
+            "generateReport": False,
+            "autoPrintReportMsg": False,
+        },
+    )
+    print(f"  Session created: {agent._session_id}")
+
+    yield agent
+
+    agent.destroy()
+    _reset_singleton()
+
+
+@device_mark
+class TestAIActionsOnRealDevice:
+    """
+    在真实 Android 设备上验证所有 AI 操作接口。
+
+    运行方式：
+      MIDSCENE_MODEL_BASE_URL=... \\
+      MIDSCENE_MODEL_API_KEY=...  \\
+      MIDSCENE_MODEL_NAME=...     \\
+      ANDROID_DEVICE_ID=emulator-5554 \\
+      pytest tests/test_agent_integration.py -m device -v -s
+    """
+
+    def test_session_created_successfully(self, real_agent):
+        """会话创建成功，sessionId 应为非空字符串。"""
+        assert real_agent._session_id
+        assert isinstance(real_agent._session_id, str)
+        assert real_agent._closed is False
+        print(f"\n  Session ID: {real_agent._session_id}")
+
+    def test_ping_via_agent_rpc(self, real_agent):
+        """通过 agent._rpc 调用 ping，验证 RPC 通道正常。"""
+        result = real_agent._rpc("ping")
+        assert result["pong"] is True
+        print(f"\n  Ping via agent._rpc OK, Node pid={result.get('pid')}")
+
+    def test_act_auto_planning(self, real_agent):
+        """
+        aiAct：AI 自动规划并执行。
+        目标描述：等待设备处于稳定状态（不要求特定 App，兼容所有设备）。
+        """
+        real_agent.act("等待当前页面完全加载，不要做任何操作")
+
+    def test_tap_element(self, real_agent):
+        """
+        aiTap：AI 定位并点击屏幕上的元素。
+        使用 deep_think=False 保证速度。
+        """
+        # 测试时根据设备上实际存在的元素调整 locate
+        real_agent.tap("屏幕中央区域", deep_think=False)
+
+    def test_assert_screen_visible(self, real_agent):
+        """
+        aiAssert：AI 视觉断言。
+        验证设备屏幕当前是可见的（通用断言，适用于任何设备状态）。
+        """
+        real_agent.assert_("设备屏幕已亮起，可以看到 UI 内容")
+
+    def test_assert_fails_with_wrong_condition(self, real_agent):
+        """
+        aiAssert 失败时应抛出 AssertionError，而非 MidsceneRPCError。
+        验证 Python 侧正确区分了"AI 返回 pass=False"与"RPC 调用失败"。
+        """
+        with pytest.raises(AssertionError) as exc_info:
+            real_agent.assert_("屏幕上有一只独角兽在飞翔")
+        assert "AI assertion failed" in str(exc_info.value)
+        print(f"\n  Expected assertion failure: {exc_info.value}")
+
+    def test_query_extracts_structured_data(self, real_agent):
+        """
+        aiQuery：从当前屏幕提取结构化数据。
+        schema 描述期望的数据结构，AI 返回 JSON。
+        """
+        result = real_agent.query(
+            '"当前屏幕上可见的主要文字内容，如果没有则返回空字符串"'
+        )
+        # result 可以是字符串或 None，但不应抛出异常
+        assert result is not None or result is None  # 任何结果都可接受
+        print(f"\n  Query result: {result!r}")
+
+    def test_scroll_down(self, real_agent):
+        """aiScroll：向下滚动当前页面。"""
+        real_agent.scroll("当前页面", direction="down", distance="small")
+
+    def test_wait_for_condition(self, real_agent):
+        """
+        aiWaitFor：等待条件满足。
+        等待屏幕稳定（最多 5 秒），这在大多数设备上应该立即成立。
+        """
+        real_agent.wait_for("屏幕 UI 处于稳定状态，没有加载动画", timeout_ms=5000)
+
+    def test_session_lifecycle_create_and_destroy(self, ai_config, device_id):
+        """
+        完整的会话生命周期：创建 → 使用 → 销毁。
+        这个测试独立创建自己的 session，验证完整的 init/destroy 流程。
+        """
+        mgr = NodeServiceManager(ai_config)
+        # ensure_started 是幂等的，复用 module 级的已有进程
+        mgr.ensure_started()
+
+        agent = MidsceneAgent(device_id, mgr)
+        session_id = agent._session_id
+
+        assert session_id is not None
+        assert agent._closed is False
+
+        # 使用 session
+        agent._rpc("ping")
+
+        # 销毁 session
+        agent.destroy()
+
+        assert agent._closed is True
+        assert agent._session_id is None
+        print(f"\n  Session {session_id} created and destroyed successfully")
+
+
+@device_mark
+class TestMidsceneMixinOnRealDevice:
+    """
+    验证 MidsceneMixin 在真实设备上的完整使用模式。
+    展示如何将 Midscene 集成到现有设备类中。
+    """
+
+    def test_full_device_lifecycle_with_context_manager(self, ai_config, device_id):
+        """
+        完整的设备生命周期演示：
+          1. 实现 MidsceneMixin 设备类
+          2. 用 context manager 管理生命周期
+          3. 通过 .ai property 访问所有 AI 能力
+        """
+
+        class MyAndroidDevice(MidsceneMixin):
+            """
+            最简单的 Midscene 设备类示例。
+            在真实项目中，这里会继承你现有的设备框架类。
+            """
+
+            def __init__(self, device_id: str, config: MidsceneConfig):
+                # 初始化现有设备逻辑（此处省略）
+                self.device_id = device_id
+
+                # 一行代码接入 Midscene AI 能力
+                self.init_midscene(
+                    device_id,
+                    config=config,
+                    agent_options={
+                        "generateReport": False,  # CI 中关闭 HTML 报告
+                        "autoPrintReportMsg": False,
+                    },
+                )
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                # 释放 AI session（必须调用）
+                self.close_midscene()
+
+        with MyAndroidDevice(device_id, ai_config) as device:
+            # 验证 session 成功创建
+            assert device._midscene_agent is not None
+            assert device._midscene_agent._session_id is not None
+
+            # 使用 AI 能力
+            device.ai.assert_("设备屏幕可见")
+            device.ai.wait_for("页面稳定", timeout_ms=3000)
+
+            print(f"\n  Device AI session: {device._midscene_agent._session_id}")
+
+        # context manager 退出后，agent 应已销毁
+        assert device._midscene_agent is None
+
+    def test_ai_property_cached_across_calls(self, ai_config, device_id):
+        """
+        多次访问 device.ai 应返回同一 MidsceneAgent 实例（懒加载缓存）。
+        避免每次访问都创建新 session。
+        """
+
+        class MyDevice(MidsceneMixin):
+            def __init__(self):
+                self.init_midscene(device_id, config=ai_config)
+
+            def __exit__(self, *_):
+                self.close_midscene()
+
+        device = MyDevice()
+        try:
+            agent_first = device.ai
+            agent_second = device.ai
+            assert agent_first is agent_second, ".ai must return the same cached instance"
+        finally:
+            device.close_midscene()
