@@ -29,11 +29,17 @@ dev = [
     "pytest-mock",
     "build",
     "twine",
+    "requests",
 ]
 
 [project.scripts]
 # 预留 CLI 入口，方便未来扩展（如手动触发 npm install）
 midscene-android = "midscene_android.cli:main"
+
+[tool.pytest.ini_options]
+markers = [
+    "device: tests that require a real Android device connected via ADB and a valid AI Key",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -40,6 +40,7 @@ _NODE_SVC_SRC = _PACKAGE_DIR / "_node_service"  # package.json + service.js
 _CACHE_DIR = Path.home() / ".midscene_android"
 _NODE_SVC_CACHE = _CACHE_DIR / "node_service"  # npm install 目标目录
 _NPM_DONE_FLAG = _NODE_SVC_CACHE / ".npm_install_done"
+_VERSION_FILE = _NODE_SVC_CACHE / ".package_version"  # 缓存版本戳，用于失效检测
 
 _NPM_INSTALL_TIMEOUT = 300  # 秒
 
@@ -129,19 +130,80 @@ def _ensure_node_shim(node_bin: Path) -> None:
 
 # ─── npm install ───────────────────────────────────────────────────────────────
 
+def _get_current_version() -> str:
+    """返回当前已安装的 Python 包版本号。"""
+    try:
+        from importlib.metadata import version
+        return version("midscene-android")
+    except Exception:
+        # 开发模式下 importlib.metadata 可能找不到包，回退到读 __version__
+        try:
+            from midscene_android import __version__
+            return __version__
+        except Exception:
+            return "unknown"
+
+
+def _is_cache_stale() -> bool:
+    """
+    检查缓存是否需要刷新。
+
+    当以下任一条件成立时认为缓存已过期：
+    - npm 安装 flag 不存在（从未安装）
+    - 版本文件不存在（旧版缓存，无版本记录）
+    - 版本文件中记录的版本与当前包版本不一致（pip upgrade 后）
+    """
+    if not _NPM_DONE_FLAG.exists():
+        return True
+    if not _VERSION_FILE.exists():
+        return True
+    try:
+        cached_ver = _VERSION_FILE.read_text(encoding="utf-8").strip()
+        return cached_ver != _get_current_version()
+    except OSError:
+        return True
+
+
+def _invalidate_cache() -> None:
+    """
+    清除缓存中的 Node 服务文件（保留 node_modules 以加速重装）。
+
+    删除：service.js、package.json、done flag、version file。
+    保留：node_modules/（npm install 速度快很多）。
+    """
+    for name in ("service.js", "package.json", _NPM_DONE_FLAG.name, _VERSION_FILE.name):
+        target = _NODE_SVC_CACHE / name
+        try:
+            target.unlink(missing_ok=True)
+            logger.debug("Cache invalidated: removed %s", name)
+        except OSError as e:
+            logger.warning("Failed to remove cache file %s: %s", name, e)
+
+
 def _ensure_node_service(node_bin: Path) -> None:
     """
-    确保 Node 服务依赖已安装到缓存目录。
-    通过 flag 文件判断是否已完成，避免重复安装。
+    确保 Node 服务依赖已安装到缓存目录，并与当前包版本一致。
+
+    - 首次运行：执行完整的 npm install
+    - pip upgrade 后：检测到版本变化，重新复制源码并重新 npm install
+    - 无变化：跳过，直接返回
     """
-    if _NPM_DONE_FLAG.exists():
-        logger.debug("npm already installed, skipping. cache=%s", _NODE_SVC_CACHE)
+    if not _is_cache_stale():
+        logger.debug(
+            "Node service cache is up-to-date (v%s), skipping install. cache=%s",
+            _get_current_version(),
+            _NODE_SVC_CACHE,
+        )
         return
 
+    current_version = _get_current_version()
+    _invalidate_cache()
+
     _print_banner(
-        "First-time setup: installing @midscene/android",
-        f"Target : {_NODE_SVC_CACHE}",
-        f"Node   : {node_bin}",
+        "Setting up @midscene/android Node service",
+        f"Package version : {current_version}",
+        f"Target          : {_NODE_SVC_CACHE}",
+        f"Node            : {node_bin}",
         "This may take a few minutes (requires npm registry access).",
     )
 
@@ -152,9 +214,8 @@ def _ensure_node_service(node_bin: Path) -> None:
     _NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
     for src in _NODE_SVC_SRC.iterdir():
         dst = _NODE_SVC_CACHE / src.name
-        if not dst.exists():
-            shutil.copy2(src, dst)
-            logger.debug("Copied %s → %s", src.name, dst)
+        shutil.copy2(src, dst)
+        logger.debug("Synced %s → %s", src.name, dst)
 
     # 用内置 Node 执行内置 npm-cli.js，PATH 置顶确保全链路不走系统 node
     npm_cli = _get_npm_cli()
@@ -172,7 +233,8 @@ def _ensure_node_service(node_bin: Path) -> None:
     )
 
     _NPM_DONE_FLAG.touch()
-    print("[midscene-android] npm install completed.", flush=True)
+    _VERSION_FILE.write_text(current_version, encoding="utf-8")
+    print(f"[midscene-android] npm install completed (v{current_version}).", flush=True)
 
 
 def _run_subprocess(
