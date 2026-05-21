@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from ._node_manager import NodeServiceManager
+from .service import NodeServiceManager
 from .agent import MidsceneAgent
 from .config import MidsceneConfig
 

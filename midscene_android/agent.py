@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 import requests
 
-from ._node_manager import NodeServiceManager
+from ._runtime import NodeServiceManager
 
 logger = logging.getLogger(__name__)
 

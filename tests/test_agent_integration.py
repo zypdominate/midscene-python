@@ -28,8 +28,7 @@ import uuid
 import pytest
 import requests
 
-from midscene_android._node_manager import (
-    NodeServiceManager,
+from midscene_android._runtime import (
     _get_current_version,
     _is_cache_stale,
     _invalidate_cache,
@@ -37,6 +36,7 @@ from midscene_android._node_manager import (
 from midscene_android.agent import MidsceneAgent, MidsceneRPCError
 from midscene_android.config import MidsceneConfig
 from midscene_android.mixin import MidsceneMixin
+from midscene_android.service import NodeServiceManager
 
 # ─── 标记定义 ─────────────────────────────────────────────────────────────────
 

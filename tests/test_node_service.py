@@ -15,11 +15,12 @@ from pathlib import Path
 
 import requests
 
+from midscene_android.service import NodeServiceManager
+
 # 确保从项目根导入，而非已安装的包
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from midscene_android._node_manager import (
-    NodeServiceManager,
+from midscene_android._runtime import (
     _get_node_bin,
     _ensure_node_service,
     _NODE_SVC_CACHE,
@@ -89,7 +90,7 @@ class TestNodeBinary:
 
     def test_node_env_prepends_bundled_dir(self):
         """_make_node_env 必须把内置 Node 目录放在 PATH 最前面。"""
-        from midscene_android._node_manager import _make_node_env
+        from midscene_android._runtime import _make_node_env
         import platform as _platform
 
         node_bin = _get_node_bin()
@@ -109,7 +110,7 @@ class TestNpmInstall:
     """验证 npm install 能正常执行（首次或已有缓存）。"""
 
     def test_npm_cli_exists(self):
-        from midscene_android._node_manager import _get_npm_cli
+        from midscene_android._runtime import _get_npm_cli
         path = _get_npm_cli()
         assert path.exists(), f"npm-cli.js not found: {path}"
         print(f"\n  npm-cli.js: {path}")
