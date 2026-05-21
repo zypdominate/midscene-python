@@ -11,17 +11,14 @@ MidsceneAgent：Python 侧的 AI 操作接口。
     device.ai.assert_("页面显示欢迎信息")
 """
 
-from __future__ import annotations
-
 import json
 import logging
-import urllib.error
-import urllib.request
 import uuid
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional
 
-if TYPE_CHECKING:
-    from ._node_manager import NodeServiceManager
+import requests
+
+from ._node_manager import NodeServiceManager
 
 logger = logging.getLogger(__name__)
 
@@ -51,17 +48,15 @@ class MidsceneAgent:
     """
 
     def __init__(
-        self,
-        device_id: str,
-        node_manager: "NodeServiceManager",
-        *,
-        agent_options: Optional[dict] = None,
-        device_options: Optional[dict] = None,
-        rpc_timeout: int = _DEFAULT_TIMEOUT,
+            self,
+            device_id: str,
+            node_manager: "NodeServiceManager",
+            *,
+            agent_options: Optional[dict] = None,
+            device_options: Optional[dict] = None,
+            rpc_timeout: int = _DEFAULT_TIMEOUT,
     ) -> None:
         """
-        Parameters
-        ----------
         device_id:
             ADB 设备 ID，如 "emulator-5554" 或 "192.168.1.100:5555"
         node_manager:
@@ -105,22 +100,15 @@ class MidsceneAgent:
             "method": method,
             "params": params,
         }
-        body = json.dumps(payload).encode("utf-8")
         url = f"http://127.0.0.1:{self._nm.port}/rpc"
-
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
         actual_timeout = timeout if timeout is not None else self._rpc_timeout
 
         logger.debug("RPC → %s %s", method, {k: v for k, v in params.items() if k != "sessionId"})
         try:
-            with urllib.request.urlopen(req, timeout=actual_timeout) as resp:
-                raw = resp.read()
-        except urllib.error.URLError as e:
+            resp = requests.post(url, json=payload, timeout=actual_timeout)
+            resp.raise_for_status()
+            raw = resp.content
+        except requests.RequestException as e:
             raise MidsceneRPCError(f"Failed to connect to Midscene Node service: {e}") from e
 
         response = json.loads(raw)
@@ -201,12 +189,12 @@ class MidsceneAgent:
         self._rpc("aiClearInput", locate=locate)
 
     def scroll(
-        self,
-        locate: str,
-        direction: str = "down",
-        *,
-        distance: Optional[str] = None,
-        scroll_type: Optional[str] = None,
+            self,
+            locate: str,
+            direction: str = "down",
+            *,
+            distance: Optional[str] = None,
+            scroll_type: Optional[str] = None,
     ) -> None:
         """
         滚动操作。对应 agent.aiScroll()。
@@ -294,11 +282,11 @@ class MidsceneAgent:
         return result.get("data")
 
     def wait_for(
-        self,
-        condition: str,
-        *,
-        timeout_ms: int = 15000,
-        check_interval_ms: Optional[int] = None,
+            self,
+            condition: str,
+            *,
+            timeout_ms: int = 15000,
+            check_interval_ms: Optional[int] = None,
     ) -> None:
         """
         等待条件满足。对应 agent.aiWaitFor()。

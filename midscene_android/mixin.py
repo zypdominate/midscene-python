@@ -32,14 +32,11 @@ MidsceneMixin：为现有 Python 设备类提供 .ai property 的混入类。
 from __future__ import annotations
 
 import logging
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
+from ._node_manager import NodeServiceManager
 from .agent import MidsceneAgent
 from .config import MidsceneConfig
-from ._node_manager import NodeServiceManager
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +50,12 @@ class MidsceneMixin:
     """
 
     def init_midscene(
-        self,
-        device_id: str,
-        *,
-        config: Optional[MidsceneConfig] = None,
-        agent_options: Optional[dict] = None,
-        device_options: Optional[dict] = None,
+            self,
+            device_id: str,
+            *,
+            config: Optional[MidsceneConfig] = None,
+            agent_options: Optional[dict] = None,
+            device_options: Optional[dict] = None,
     ) -> None:
         """
         初始化 Midscene 相关状态。在子类 __init__ 中调用。
