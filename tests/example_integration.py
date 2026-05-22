@@ -21,30 +21,18 @@ class AndroidDevice(MidsceneMixin):
     """
 
     def __init__(
-        self,
-        device_id: str,
-        *,
-        midscene_config: MidsceneConfig | None = None,
-        # 你的其他参数...
+            self,
+            device_id: str,
+            *,
+            midscene_config: MidsceneConfig | None = None,
+            # 你的其他参数...
     ):
         # 初始化你现有的设备逻辑
         self.device_id = device_id
         self._connected = False
 
         # 初始化 Midscene（一行代码）
-        self.init_midscene(
-            device_id,
-            config=midscene_config,
-            # 可选：传递给 AndroidAgent 的选项
-            agent_options={
-                "generateReport": False,   # 是否生成 HTML 报告
-                "aiActContext": None,      # 全局上下文提示
-            },
-            # 可选：传递给 AndroidDevice 的选项
-            device_options={
-                # "androidAdbPath": "/custom/adb",  # 自定义 adb 路径
-            },
-        )
+        self.init_midscene(device_id)
 
     # ── 你现有的原生方法（保持不变）─────────────────────────────────────────
 
@@ -79,7 +67,7 @@ class AndroidDevice(MidsceneMixin):
         return self
 
     def __exit__(self, *_) -> None:
-        self.close_midscene()   # 销毁 Midscene session
+        self.close_midscene()  # 销毁 Midscene session
         self.disconnect()
 
 
@@ -89,18 +77,17 @@ class AndroidDevice(MidsceneMixin):
 
 import pytest
 
-# AI 模型配置（实际项目中从环境变量或配置文件读取）
-MIDSCENE_CONFIG = MidsceneConfig(
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    api_key="sk-your-api-key-here",   # 明文或 base64 均可
-    model_name="qwen-vl-max",
-    model_family="qwen",
-)
-
 
 @pytest.fixture(scope="session")
 def midscene_config() -> MidsceneConfig:
     """session 级别的 AI 配置（整个测试会话共享一个 Node 进程）。"""
+    # AI 模型配置（实际项目中从环境变量或配置文件读取）
+    MIDSCENE_CONFIG = MidsceneConfig(
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key="sk-your-api-key-here",  # 明文或 base64 均可
+        model_name="qwen-vl-max",
+        model_family="qwen",
+    )
     return MIDSCENE_CONFIG
 
 
@@ -182,7 +169,9 @@ class ExistingDevice:
         self.device_id = device_id
 
     def click(self, x, y): ...
+
     def __enter__(self): return self
+
     def __exit__(self, *_): ...
 
 
@@ -191,7 +180,7 @@ class ExistingDeviceWithAI(ExistingDevice, MidsceneMixin):
 
     def __init__(self, device_id: str, *, midscene_config=None):
         ExistingDevice.__init__(self, device_id)
-        self.init_midscene(device_id, config=midscene_config)
+        self.init_midscene(device_id)
 
     def __exit__(self, *_):
         self.close_midscene()

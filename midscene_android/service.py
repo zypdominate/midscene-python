@@ -19,7 +19,7 @@ import threading
 import time
 from typing import Optional
 
-from ._runtime import _get_node_bin, _ensure_node_service, _NODE_SVC_CACHE, _make_node_env, logger
+from . import runtime
 from .config import MidsceneConfig
 
 
@@ -38,7 +38,7 @@ class NodeServiceManager:
     _instance: Optional["NodeServiceManager"] = None
     _lock = threading.Lock()
 
-    def __new__(cls, config: MidsceneConfig) -> "NodeServiceManager":
+    def __new__(cls, config: MidsceneConfig):
         with cls._lock:
             if cls._instance is None:
                 inst = super().__new__(cls)
@@ -79,25 +79,25 @@ class NodeServiceManager:
         return self._proc is not None and self._proc.poll() is None
 
     def _start(self) -> None:
-        node_bin = _get_node_bin()
-        _ensure_node_service(node_bin)
+        node_bin = runtime.get_node_bin()
+        runtime.ensure_node_service(node_bin)
 
-        service_js = _NODE_SVC_CACHE / "service.js"
+        service_js = runtime.NODE_SVC_CACHE / "service.js"
 
         # PATH 置顶 + AI 模型配置 + Node 运行时配置，全部不依赖系统 node
-        env = _make_node_env(
+        env = runtime.make_node_env(
             node_bin,
             extra={
                 **self._config.to_node_env(),
                 "PORT": "0",  # OS 分配空闲端口，避免冲突
-                "NODE_PATH": str(_NODE_SVC_CACHE / "node_modules"),
+                "NODE_PATH": str(runtime.NODE_SVC_CACHE / "node_modules"),
             },
         )
 
-        logger.debug("Spawning Node service: %s %s", node_bin.name, service_js)
+        runtime.logger.debug("Spawning Node service: %s %s", node_bin.name, service_js)
         self._proc = subprocess.Popen(
             [str(node_bin), str(service_js)],
-            cwd=str(_NODE_SVC_CACHE),
+            cwd=str(runtime.NODE_SVC_CACHE),
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -109,7 +109,7 @@ class NodeServiceManager:
 
         self._port = self._wait_ready()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
-        logger.info(
+        runtime.logger.info(
             "Midscene Node service ready  port=%d  pid=%d  node=%s",
             self._port, self._proc.pid, node_bin.name,
         )
@@ -134,7 +134,7 @@ class NodeServiceManager:
                 time.sleep(0.05)
                 continue
             line = line.strip()
-            logger.debug("[node] %s", line)
+            runtime.logger.debug("[node] %s", line)
             if line.startswith("MIDSCENE_SERVICE_READY:"):
                 return int(line.split(":", 1)[1])
 
@@ -146,11 +146,11 @@ class NodeServiceManager:
         """持续消费 stderr，防止管道满阻塞子进程。"""
         assert self._proc and self._proc.stderr
         for line in self._proc.stderr:
-            logger.debug("[node stderr] %s", line.rstrip())
+            runtime.logger.debug("[node stderr] %s", line.rstrip())
 
     def _shutdown(self) -> None:
         if self._proc and self._proc.poll() is None:
-            logger.debug("Terminating Node service pid=%d", self._proc.pid)
+            runtime.logger.debug("Terminating Node service pid=%d", self._proc.pid)
             self._proc.terminate()
             try:
                 self._proc.wait(timeout=5)

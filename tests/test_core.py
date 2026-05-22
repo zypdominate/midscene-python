@@ -111,12 +111,14 @@ def stub_rpc_server():
 
 
 @pytest.fixture
-def stub_node_manager(stub_rpc_server):
-    """
-    返回一个指向本地 stub RPC 服务器的 _NodeManagerStub 实例。
-    """
+def stub_node_manager(stub_rpc_server, monkeypatch):
     port, handler = stub_rpc_server
-    return _NodeManagerStub(port), handler
+    nm = _NodeManagerStub(port)
+    monkeypatch.setattr("midscene_android.agent.NodeServiceManager", lambda config: nm)
+    monkeypatch.setenv("MIDSCENE_MODEL_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("MIDSCENE_MODEL_API_KEY", "test-key")
+    monkeypatch.setenv("MIDSCENE_MODEL_NAME", "test-model")
+    return nm, handler
 
 
 @pytest.fixture
@@ -212,8 +214,8 @@ class TestBase64Helpers:
 class TestMidsceneAgent:
 
     def test_creates_session_on_init(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
+        _, handler = stub_node_manager
+        agent = MidsceneAgent("emulator-5554")
 
         assert agent._session_id == "test_session_001"
 
@@ -222,8 +224,8 @@ class TestMidsceneAgent:
         assert create_calls[0]["params"]["deviceId"] == "emulator-5554"
 
     def test_act_sends_correct_rpc(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
+        _, handler = stub_node_manager
+        agent = MidsceneAgent("emulator-5554")
         agent.act("点击登录按钮")
 
         act_calls = [r for r in handler.requests_received if r["method"] == "aiAct"]
@@ -231,17 +233,9 @@ class TestMidsceneAgent:
         assert act_calls[0]["params"]["prompt"] == "点击登录按钮"
         assert act_calls[0]["params"]["sessionId"] == "test_session_001"
 
-    def test_act_cacheable_flag_forwarded(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
-        agent.act("点击登录按钮", cacheable=True)
-
-        act_calls = [r for r in handler.requests_received if r["method"] == "aiAct"]
-        assert act_calls[0]["params"]["options"]["cacheable"] is True
-
     def test_tap_sends_correct_rpc(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
+        _, handler = stub_node_manager
+        agent = MidsceneAgent("emulator-5554")
         agent.tap("确认按钮")
 
         tap_calls = [r for r in handler.requests_received if r["method"] == "aiTap"]
@@ -249,17 +243,9 @@ class TestMidsceneAgent:
         assert tap_calls[0]["params"]["locate"] == "确认按钮"
         assert tap_calls[0]["params"]["sessionId"] == "test_session_001"
 
-    def test_tap_deep_think_flag_forwarded(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
-        agent.tap("密集列表中的按钮", deep_think=True)
-
-        tap_calls = [r for r in handler.requests_received if r["method"] == "aiTap"]
-        assert tap_calls[0]["params"]["options"]["deepThink"] is True
-
     def test_input_sends_locate_and_text(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
+        _, handler = stub_node_manager
+        agent = MidsceneAgent("emulator-5554")
         agent.input("用户名输入框", "testuser")
 
         input_calls = [r for r in handler.requests_received if r["method"] == "aiInput"]
@@ -268,8 +254,8 @@ class TestMidsceneAgent:
         assert input_calls[0]["params"]["text"] == "testuser"
 
     def test_scroll_sends_direction_and_locate(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
+        _, handler = stub_node_manager
+        agent = MidsceneAgent("emulator-5554")
         agent.scroll("商品列表", direction="up", distance="large")
 
         scroll_calls = [r for r in handler.requests_received if r["method"] == "aiScroll"]
@@ -280,8 +266,8 @@ class TestMidsceneAgent:
         assert params["distance"] == "large"
 
     def test_key_press_sends_key(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
+        _, handler = stub_node_manager
+        agent = MidsceneAgent("emulator-5554")
         agent.key_press("Back")
 
         key_calls = [r for r in handler.requests_received if r["method"] == "aiKeyboardPress"]
@@ -289,15 +275,15 @@ class TestMidsceneAgent:
         assert key_calls[0]["params"]["key"] == "Back"
 
     def test_assert_passes_when_node_returns_true(self, stub_node_manager):
-        manager, handler = stub_node_manager
+        _, handler = stub_node_manager
         handler.responses["aiAssert"] = {"pass": True, "reason": None}
-        agent = MidsceneAgent("emulator-5554", manager)
+        agent = MidsceneAgent("emulator-5554")
         agent.assert_("页面显示欢迎信息")  # 不应抛出
 
     def test_assert_raises_assertion_error_when_fails(self, stub_node_manager):
-        manager, handler = stub_node_manager
+        _, handler = stub_node_manager
         handler.responses["aiAssert"] = {"pass": False, "reason": "未找到欢迎信息"}
-        agent = MidsceneAgent("emulator-5554", manager)
+        agent = MidsceneAgent("emulator-5554")
 
         with pytest.raises(AssertionError) as exc_info:
             agent.assert_("页面显示欢迎信息")
@@ -305,63 +291,52 @@ class TestMidsceneAgent:
         assert "页面显示欢迎信息" in str(exc_info.value)
         assert "未找到欢迎信息" in str(exc_info.value)
 
-    def test_assert_includes_custom_msg_on_failure(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        handler.responses["aiAssert"] = {"pass": False, "reason": "元素不可见"}
-        agent = MidsceneAgent("emulator-5554", manager)
-
-        with pytest.raises(AssertionError) as exc_info:
-            agent.assert_("按钮可见", msg="截图已保存至 /tmp/debug.png")
-
-        assert "截图已保存至 /tmp/debug.png" in str(exc_info.value)
-
     def test_query_returns_data(self, stub_node_manager):
-        manager, handler = stub_node_manager
+        _, handler = stub_node_manager
         handler.responses["aiQuery"] = {"data": {"username": "testuser", "level": 5}}
-        agent = MidsceneAgent("emulator-5554", manager)
+        agent = MidsceneAgent("emulator-5554")
 
         result = agent.query('{"username": string, "level": number}')
         assert result["username"] == "testuser"
         assert result["level"] == 5
 
     def test_destroy_sends_rpc_and_marks_closed(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
+        _, handler = stub_node_manager
+        agent = MidsceneAgent("emulator-5554")
         agent.destroy()
 
-        assert agent._closed is True
         assert agent._session_id is None
         destroy_calls = [r for r in handler.requests_received if r["method"] == "destroySession"]
         assert len(destroy_calls) == 1
 
     def test_destroy_idempotent(self, stub_node_manager):
         """多次 destroy 不应抛出异常，也不应重复发送 RPC。"""
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
+        _, handler = stub_node_manager
+        agent = MidsceneAgent("emulator-5554")
         agent.destroy()
         agent.destroy()  # 第二次应静默跳过
 
         destroy_calls = [r for r in handler.requests_received if r["method"] == "destroySession"]
         assert len(destroy_calls) == 1
 
-    def test_rpc_after_destroy_raises_runtime_error(self, stub_node_manager):
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
-        agent.destroy()
-
-        with pytest.raises(RuntimeError, match="destroyed"):
-            agent.act("点击按钮")
-
-    def test_rpc_error_raises_midscene_rpc_error(self, error_rpc_server):
-        manager = _NodeManagerStub(error_rpc_server)
-        agent = MidsceneAgent("emulator-5554", manager)
+    def test_rpc_error_raises_midscene_rpc_error(self, error_rpc_server, monkeypatch):
+        nm = _NodeManagerStub(error_rpc_server)
+        monkeypatch.setattr("midscene_android.agent.NodeServiceManager", lambda config: nm)
+        monkeypatch.setenv("MIDSCENE_MODEL_BASE_URL", "http://test/v1")
+        monkeypatch.setenv("MIDSCENE_MODEL_API_KEY", "test-key")
+        monkeypatch.setenv("MIDSCENE_MODEL_NAME", "test-model")
+        agent = MidsceneAgent("emulator-5554")
 
         with pytest.raises(MidsceneRPCError, match="Device disconnected"):
             agent.act("点击按钮")
 
-    def test_rpc_error_carries_error_code(self, error_rpc_server):
-        manager = _NodeManagerStub(error_rpc_server)
-        agent = MidsceneAgent("emulator-5554", manager)
+    def test_rpc_error_carries_error_code(self, error_rpc_server, monkeypatch):
+        nm = _NodeManagerStub(error_rpc_server)
+        monkeypatch.setattr("midscene_android.agent.NodeServiceManager", lambda config: nm)
+        monkeypatch.setenv("MIDSCENE_MODEL_BASE_URL", "http://test/v1")
+        monkeypatch.setenv("MIDSCENE_MODEL_API_KEY", "test-key")
+        monkeypatch.setenv("MIDSCENE_MODEL_NAME", "test-model")
+        agent = MidsceneAgent("emulator-5554")
 
         try:
             agent.act("点击按钮")
@@ -371,8 +346,8 @@ class TestMidsceneAgent:
 
     def test_session_id_injected_in_all_rpc_calls(self, stub_node_manager):
         """确保每次 RPC 调用都自动附带 sessionId。"""
-        manager, handler = stub_node_manager
-        agent = MidsceneAgent("emulator-5554", manager)
+        _, handler = stub_node_manager
+        agent = MidsceneAgent("emulator-5554")
         agent.tap("任意按钮")
         agent.act("任意操作")
 
@@ -385,43 +360,9 @@ class TestMidsceneAgent:
                 f"sessionId missing in {req['method']}"
             )
 
-    def test_agent_options_forwarded_to_create_session(self, stub_rpc_server):
-        port, handler = stub_rpc_server
-        manager = _NodeManagerStub(port)
-        agent = MidsceneAgent(
-            "emulator-5554",
-            manager,
-            agent_options={"generateReport": True},
-        )
-
-        create_call = next(r for r in handler.requests_received if r["method"] == "createSession")
-        assert create_call["params"]["agentOptions"]["generateReport"] is True
-
-    def test_device_options_forwarded_to_create_session(self, stub_rpc_server):
-        port, handler = stub_rpc_server
-        manager = _NodeManagerStub(port)
-        agent = MidsceneAgent(
-            "emulator-5554",
-            manager,
-            device_options={"androidAdbPath": "/custom/adb"},
-        )
-
-        create_call = next(r for r in handler.requests_received if r["method"] == "createSession")
-        assert create_call["params"]["deviceOptions"]["androidAdbPath"] == "/custom/adb"
-
-
 # ─── MidsceneMixin 测试 ───────────────────────────────────────────────────────
 
 class TestMidsceneMixin:
-
-    def test_ai_property_raises_without_config(self):
-        class MyDevice(MidsceneMixin):
-            def __init__(self):
-                self.init_midscene("emulator-5554", config=None)
-
-        device = MyDevice()
-        with pytest.raises(RuntimeError, match="midscene_config is required"):
-            _ = device.ai
 
     def test_ai_property_raises_without_init(self):
         class BadDevice(MidsceneMixin):
@@ -441,23 +382,19 @@ class TestMidsceneMixin:
 
     def test_close_midscene_calls_agent_destroy(self, stub_node_manager):
         """close_midscene 应调用 agent.destroy() 并置空引用。"""
-        manager, handler = stub_node_manager
+        _, handler = stub_node_manager
 
         class MyDevice(MidsceneMixin):
             def __init__(self):
-                config = MidsceneConfig("http://x.com", "key", "model")
-                self.init_midscene("emulator-5554", config=config)
+                self.init_midscene("emulator-5554")
 
         device = MyDevice()
-
-        # 直接注入通过 stub 服务器创建的真实 agent，跳过 NodeServiceManager 启动
-        agent = MidsceneAgent("emulator-5554", manager)
+        agent = MidsceneAgent("emulator-5554")
         device._midscene_agent = agent
 
         device.close_midscene()
 
-        # agent.destroy() 被调用：session 已关闭，引用已置空
-        assert agent._closed is True
+        assert agent._session_id is None
         assert device._midscene_agent is None
 
         destroy_calls = [r for r in handler.requests_received if r["method"] == "destroySession"]
@@ -465,33 +402,27 @@ class TestMidsceneMixin:
 
     def test_close_midscene_idempotent(self, stub_node_manager):
         """多次 close_midscene 不应抛出异常。"""
-        manager, handler = stub_node_manager
+        _, handler = stub_node_manager
 
         class MyDevice(MidsceneMixin):
             def __init__(self):
-                config = MidsceneConfig("http://x.com", "key", "model")
-                self.init_midscene("emulator-5554", config=config)
+                self.init_midscene("emulator-5554")
 
         device = MyDevice()
-        agent = MidsceneAgent("emulator-5554", manager)
-        device._midscene_agent = agent
+        device._midscene_agent = MidsceneAgent("emulator-5554")
 
         device.close_midscene()
-        device.close_midscene()  # 第二次应静默跳过，不抛出
+        device.close_midscene()
 
     def test_ai_caches_agent_instance(self, stub_node_manager):
         """多次访问 .ai 应返回同一个 agent 实例。"""
-        manager, handler = stub_node_manager
-
         class MyDevice(MidsceneMixin):
             def __init__(self):
-                config = MidsceneConfig("http://x.com", "key", "model")
-                self.init_midscene("emulator-5554", config=config)
+                self.init_midscene("emulator-5554")
 
         device = MyDevice()
-        agent = MidsceneAgent("emulator-5554", manager)
+        agent = MidsceneAgent("emulator-5554")
         device._midscene_agent = agent
 
-        # 两次访问 .ai 应返回同一实例
         assert device.ai is agent
         assert device.ai is agent

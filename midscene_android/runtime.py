@@ -10,22 +10,22 @@ logger = logging.getLogger(__name__)
 
 # ─── 路径常量 ──────────────────────────────────────────────────────────────────
 
-_PACKAGE_DIR = Path(__file__).parent
-_NODE_BIN_DIR = _PACKAGE_DIR / "_runtime" / "bin"
-_NPM_CLI = _PACKAGE_DIR / "_runtime" / "npm" / "bin" / "npm-cli.js"
-_NODE_SVC_SRC = _PACKAGE_DIR / "_node_service"  # package.json + service.js
+PACKAGE_DIR = Path(__file__).parent
+NODE_BIN_DIR = PACKAGE_DIR / "_runtime" / "bin"
+NPM_CLI = PACKAGE_DIR / "_runtime" / "npm" / "bin" / "npm-cli.js"
+NODE_SVC_SRC = PACKAGE_DIR / "_node_service"  # package.json + service.js
 
-_CACHE_DIR = Path.home() / ".midscene_android"
-_NODE_SVC_CACHE = _CACHE_DIR / "node_service"  # npm install 目标目录
-_NPM_DONE_FLAG = _NODE_SVC_CACHE / ".npm_install_done"
-_VERSION_FILE = _NODE_SVC_CACHE / ".package_version"  # 缓存版本戳，用于失效检测
+CACHE_DIR = Path.home() / ".midscene_android"
+NODE_SVC_CACHE = CACHE_DIR / "node_service"  # npm install 目标目录
+NPM_DONE_FLAG = NODE_SVC_CACHE / ".npm_install_done"
+VERSION_FILE = NODE_SVC_CACHE / ".package_version"  # 缓存版本戳，用于失效检测
 
-_NPM_INSTALL_TIMEOUT = 300  # 秒
+NPM_INSTALL_TIMEOUT = 300  # 秒
 
 
 # ─── 平台检测 ──────────────────────────────────────────────────────────────────
 
-def _get_node_bin() -> Path:
+def get_node_bin() -> Path:
     """返回内置 Node 可执行文件的绝对路径。"""
     system = platform.system().lower()  # windows / darwin / linux
     machine = platform.machine().lower()  # x86_64 / aarch64 / arm64
@@ -39,7 +39,7 @@ def _get_node_bin() -> Path:
     else:
         name = f"node-linux-{arch}"
 
-    path = _NODE_BIN_DIR / name
+    path = NODE_BIN_DIR / name
     if not path.exists():
         raise FileNotFoundError(
             f"Bundled Node binary not found: {path}\n"
@@ -48,19 +48,19 @@ def _get_node_bin() -> Path:
     return path
 
 
-def _get_npm_cli() -> Path:
+def get_npm_cli() -> Path:
     """返回内置 npm-cli.js 路径，不存在时给出明确提示。"""
-    if not _NPM_CLI.exists():
+    if not NPM_CLI.exists():
         raise FileNotFoundError(
-            f"Bundled npm-cli.js not found: {_NPM_CLI}\n"
+            f"Bundled npm-cli.js not found: {NPM_CLI}\n"
             f"Run: python scripts/fetch_node_binaries.py"
         )
-    return _NPM_CLI
+    return NPM_CLI
 
 
 # ─── 环境变量构造 ──────────────────────────────────────────────────────────────
 
-def _make_node_env(node_bin: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
+def make_node_env(node_bin: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
     """
     构造子进程环境变量，确保所有层级都使用内置 Node，不依赖系统 node。
 
@@ -80,7 +80,7 @@ def _make_node_env(node_bin: Path, extra: dict[str, str] | None = None) -> dict[
     return env
 
 
-def _ensure_node_shim(node_bin: Path) -> None:
+def ensure_node_shim(node_bin: Path) -> None:
     """
     在内置 Node bin 目录创建裸名称的 shim，
     使 npm 内部 fork 调用 "node"（无后缀/无平台名）时能正确找到内置二进制。
@@ -108,7 +108,7 @@ def _ensure_node_shim(node_bin: Path) -> None:
 
 # ─── npm install ───────────────────────────────────────────────────────────────
 
-def _get_current_version() -> str:
+def get_current_version() -> str:
     """返回当前已安装的 Python 包版本号。"""
     try:
         from importlib.metadata import version
@@ -122,7 +122,7 @@ def _get_current_version() -> str:
             return "unknown"
 
 
-def _is_cache_stale() -> bool:
+def is_cache_stale() -> bool:
     """
     检查缓存是否需要刷新。
 
@@ -131,26 +131,35 @@ def _is_cache_stale() -> bool:
     - 版本文件不存在（旧版缓存，无版本记录）
     - 版本文件中记录的版本与当前包版本不一致（pip upgrade 后）
     """
-    if not _NPM_DONE_FLAG.exists():
+    if not NPM_DONE_FLAG.exists():
         return True
-    if not _VERSION_FILE.exists():
+    if not VERSION_FILE.exists():
         return True
     try:
-        cached_ver = _VERSION_FILE.read_text(encoding="utf-8").strip()
-        return cached_ver != _get_current_version()
+        cached_ver = VERSION_FILE.read_text(encoding="utf-8").strip()
+        return cached_ver != get_current_version()
     except OSError:
         return True
 
 
-def _invalidate_cache() -> None:
+def sync_node_service_sources() -> None:
+    """将 _node_service 源码同步到缓存目录（不触发 npm install）。"""
+    NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
+    for src in NODE_SVC_SRC.iterdir():
+        dst = NODE_SVC_CACHE / src.name
+        shutil.copy2(src, dst)
+        logger.debug("Synced %s → %s", src.name, dst)
+
+
+def invalidate_cache() -> None:
     """
     清除缓存中的 Node 服务文件（保留 node_modules 以加速重装）。
 
     删除：service.js、package.json、done flag、version file。
     保留：node_modules/（npm install 速度快很多）。
     """
-    for name in ("service.js", "package.json", _NPM_DONE_FLAG.name, _VERSION_FILE.name):
-        target = _NODE_SVC_CACHE / name
+    for name in ("service.js", "package.json", NPM_DONE_FLAG.name, VERSION_FILE.name):
+        target = NODE_SVC_CACHE / name
         try:
             target.unlink(missing_ok=True)
             logger.debug("Cache invalidated: removed %s", name)
@@ -158,7 +167,7 @@ def _invalidate_cache() -> None:
             logger.warning("Failed to remove cache file %s: %s", name, e)
 
 
-def _ensure_node_service(node_bin: Path) -> None:
+def ensure_node_service(node_bin: Path) -> None:
     """
     确保 Node 服务依赖已安装到缓存目录，并与当前包版本一致。
 
@@ -166,56 +175,52 @@ def _ensure_node_service(node_bin: Path) -> None:
     - pip upgrade 后：检测到版本变化，重新复制源码并重新 npm install
     - 无变化：跳过，直接返回
     """
-    if not _is_cache_stale():
+    if not is_cache_stale():
+        sync_node_service_sources()
         logger.debug(
             "Node service cache is up-to-date (v%s), skipping install. cache=%s",
-            _get_current_version(),
-            _NODE_SVC_CACHE,
+            get_current_version(),
+            NODE_SVC_CACHE,
         )
         return
 
-    current_version = _get_current_version()
-    _invalidate_cache()
+    current_version = get_current_version()
+    invalidate_cache()
 
-    _print_banner(
+    print_banner(
         "Setting up @midscene/android Node service",
         f"Package version : {current_version}",
-        f"Target          : {_NODE_SVC_CACHE}",
+        f"Target          : {NODE_SVC_CACHE}",
         f"Node            : {node_bin}",
         "This may take a few minutes (requires npm registry access).",
     )
 
     # shim：让 npm install 期间内部 fork 也走内置 Node
-    _ensure_node_shim(node_bin)
+    ensure_node_shim(node_bin)
 
-    # 将 Node 服务源码同步到缓存目录（package.json + service.js）
-    _NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
-    for src in _NODE_SVC_SRC.iterdir():
-        dst = _NODE_SVC_CACHE / src.name
-        shutil.copy2(src, dst)
-        logger.debug("Synced %s → %s", src.name, dst)
+    sync_node_service_sources()
 
     # 用内置 Node 执行内置 npm-cli.js，PATH 置顶确保全链路不走系统 node
-    npm_cli = _get_npm_cli()
+    npm_cli = get_npm_cli()
     cmd = [str(node_bin), str(npm_cli), "install", "--production"]
-    env = _make_node_env(node_bin)
+    env = make_node_env(node_bin)
 
     logger.debug("npm install: %s", " ".join(cmd))
 
-    _run_subprocess(
+    run_subprocess(
         cmd,
-        cwd=_NODE_SVC_CACHE,
-        timeout=_NPM_INSTALL_TIMEOUT,
+        cwd=NODE_SVC_CACHE,
+        timeout=NPM_INSTALL_TIMEOUT,
         error_prefix="npm install failed",
         env=env,
     )
 
-    _NPM_DONE_FLAG.touch()
-    _VERSION_FILE.write_text(current_version, encoding="utf-8")
+    NPM_DONE_FLAG.touch()
+    VERSION_FILE.write_text(current_version, encoding="utf-8")
     print(f"[midscene-android] npm install completed (v{current_version}).", flush=True)
 
 
-def _run_subprocess(
+def run_subprocess(
         cmd: list[str],
         cwd: Path,
         timeout: int,
@@ -260,7 +265,7 @@ def _run_subprocess(
         raise RuntimeError(f"{error_prefix} (exit={proc.returncode}):\n{tail}")
 
 
-def _print_banner(*lines: str) -> None:
+def print_banner(*lines: str) -> None:
     sep = "=" * 60
     print(f"\n{sep}", flush=True)
     for line in lines:

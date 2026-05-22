@@ -20,11 +20,7 @@ from midscene_android.service import NodeServiceManager
 # 确保从项目根导入，而非已安装的包
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from midscene_android._runtime import (
-    _get_node_bin,
-    _ensure_node_service,
-    _NODE_SVC_CACHE,
-)
+from midscene_android import runtime
 from midscene_android.config import MidsceneConfig
 
 
@@ -54,7 +50,7 @@ class TestNodeBinary:
     """验证内置 Node 二进制可用，且不依赖系统 node。"""
 
     def test_node_bin_exists(self):
-        path = _get_node_bin()
+        path = runtime.get_node_bin()
         assert path.exists(), f"Node binary not found: {path}"
         print(f"\n  Node binary : {path}")
         print(f"  Size        : {path.stat().st_size // 1024 // 1024} MB")
@@ -62,7 +58,7 @@ class TestNodeBinary:
     def test_node_bin_is_bundled_not_system(self):
         """内置 Node 路径必须在本库 _runtime/bin/ 下，不能是系统 node。"""
         import shutil
-        bundled = _get_node_bin()
+        bundled = runtime.get_node_bin()
         system_node = shutil.which("node")
 
         # 内置路径必须包含 _runtime/bin
@@ -78,7 +74,7 @@ class TestNodeBinary:
 
     def test_node_bin_executable(self):
         import subprocess
-        node = _get_node_bin()
+        node = runtime.get_node_bin()
         result = subprocess.run(
             [str(node), "--version"],
             capture_output=True, text=True, timeout=10,
@@ -89,12 +85,12 @@ class TestNodeBinary:
         assert version.startswith("v"), f"Unexpected version output: {version}"
 
     def test_node_env_prepends_bundled_dir(self):
-        """_make_node_env 必须把内置 Node 目录放在 PATH 最前面。"""
-        from midscene_android._runtime import _make_node_env
+        """make_node_env 必须把内置 Node 目录放在 PATH 最前面。"""
+        from midscene_android.runtime import make_node_env
         import platform as _platform
 
-        node_bin = _get_node_bin()
-        env = _make_node_env(node_bin)
+        node_bin = runtime.get_node_bin()
+        env = make_node_env(node_bin)
         sep = ";" if _platform.system().lower() == "windows" else ":"
         first_path = env["PATH"].split(sep)[0]
 
@@ -110,22 +106,22 @@ class TestNpmInstall:
     """验证 npm install 能正常执行（首次或已有缓存）。"""
 
     def test_npm_cli_exists(self):
-        from midscene_android._runtime import _get_npm_cli
-        path = _get_npm_cli()
+        from midscene_android.runtime import get_npm_cli
+        path = get_npm_cli()
         assert path.exists(), f"npm-cli.js not found: {path}"
         print(f"\n  npm-cli.js: {path}")
 
     def test_ensure_node_service_idempotent(self):
-        """多次调用 _ensure_node_service 应该幂等（第二次直接跳过）。"""
-        node_bin = _get_node_bin()
+        """多次调用 runtime.ensure_node_service 应该幂等（第二次直接跳过）。"""
+        node_bin = runtime.get_node_bin()
         # 第一次（若已有 flag 直接跳过；若无则真正安装）
         t0 = time.monotonic()
-        _ensure_node_service(node_bin)
+        runtime.ensure_node_service(node_bin)
         elapsed_first = time.monotonic() - t0
 
         # 第二次必须立即返回（<1s）
         t1 = time.monotonic()
-        _ensure_node_service(node_bin)
+        runtime.ensure_node_service(node_bin)
         elapsed_second = time.monotonic() - t1
 
         assert elapsed_second < 1.0, (
@@ -136,10 +132,10 @@ class TestNpmInstall:
 
     def test_node_service_files_exist_after_install(self):
         """npm install 完成后，node_modules/@midscene/android 应存在。"""
-        node_bin = _get_node_bin()
-        _ensure_node_service(node_bin)
+        node_bin = runtime.get_node_bin()
+        runtime.ensure_node_service(node_bin)
 
-        midscene_pkg = _NODE_SVC_CACHE / "node_modules" / "@midscene" / "android"
+        midscene_pkg = runtime.NODE_SVC_CACHE / "node_modules" / "@midscene" / "android"
         assert midscene_pkg.exists(), (
             f"@midscene/android not found after npm install: {midscene_pkg}"
         )
