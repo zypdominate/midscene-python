@@ -14,13 +14,15 @@ _TIMEOUT = 120
 class MidsceneAgent:
     def __init__(self, device_id: str):
         self._device_id = device_id
+        self._session_id = None
+        self._closed = False
         nm = NodeServiceManager(MidsceneConfig.from_env())
         nm.ensure_started()
         self._port = nm.port
         self._session_id = self._rpc("createSession", deviceId=device_id)["sessionId"]
 
     def _rpc(self, method: str, timeout: int = _TIMEOUT, **params):
-        if hasattr(self, "_session_id") and method != "createSession":
+        if self._session_id is not None and method != "createSession":
             params["sessionId"] = self._session_id
         resp = requests.post(
             f"http://127.0.0.1:{self._port}/rpc",
@@ -71,18 +73,24 @@ class MidsceneAgent:
         return self._rpc("aiQuery", schema=schema).get("data")
 
     def wait_for(self, condition: str, timeout_ms: int = 15000):
+        rpc_timeout = max(_TIMEOUT, timeout_ms // 1000 + 10)
         self._rpc(
             "aiWaitFor",
-            timeout=max(_TIMEOUT, timeout_ms // 1000 + 10),
+            timeout=rpc_timeout,
             condition=condition,
             timeoutMs=timeout_ms,
         )
 
     def destroy(self):
-        if not self._session_id:
+        if self._closed:
             return
-        self._rpc("destroySession")
+        if self._session_id:
+            try:
+                self._rpc("destroySession", sessionId=self._session_id)
+            except Exception as e:
+                print(f"Error destroying session {self._session_id}: {e}")
         self._session_id = None
+        self._closed = True
 
     def is_closed(self):
-        return not bool(self._session_id)
+        return self._closed
