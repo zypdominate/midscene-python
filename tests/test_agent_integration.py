@@ -85,18 +85,37 @@ def _require_connected_device_id(config: MidsceneConfig) -> str:
         },
         timeout=60,
     )
-    devices = resp.json().get("result", {}).get("devices", [])
+    devices = _extract_connected_devices(resp.json())
+    device_id = _pick_ready_device_id(devices)
+    if not device_id:
+        pytest.skip("No Android device connected via ADB")
+    return device_id
+
+
+def _extract_connected_devices(body: dict) -> list[dict]:
+    if "error" in body:
+        raise RuntimeError(body["error"].get("message", "getConnectedDevices RPC failed"))
+    return body.get("result", {}).get("devices", [])
+
+
+def _pick_ready_device_id(devices: list[dict]) -> str | None:
     ready = [d for d in devices if d.get("state") == "device"] or devices
     if not ready or not ready[0].get("udid"):
-        pytest.skip("No Android device connected via ADB")
+        return None
     return ready[0]["udid"]
 
 
 @pytest.fixture
-def dummy_midscene_env(monkeypatch):
-    monkeypatch.setenv("MIDSCENE_MODEL_BASE_URL", "https://placeholder.example.com/v1")
-    monkeypatch.setenv("MIDSCENE_MODEL_API_KEY", "dummy-key")
-    monkeypatch.setenv("MIDSCENE_MODEL_NAME", "placeholder-model")
+def dummy_midscene_env():
+    snapshot = dict(os.environ)
+    os.environ["MIDSCENE_MODEL_BASE_URL"] = "https://placeholder.example.com/v1"
+    os.environ["MIDSCENE_MODEL_API_KEY"] = "dummy-key"
+    os.environ["MIDSCENE_MODEL_NAME"] = "placeholder-model"
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(snapshot)
 
 
 @pytest.fixture
@@ -482,14 +501,14 @@ class TestMidsceneMixinInit:
     def teardown_method(self):
         _reset_singleton()
 
-    def test_ai_property_triggers_node_service_and_fails_gracefully(self, dummy_midscene_env):
+    def test_ai_property_requires_config_before_node_access(self, dummy_midscene_env):
         class SimulatedDevice(MidsceneMixin):
             def __init__(self, device_id: str):
                 self.init_midscene(device_id)
 
         device = SimulatedDevice("non-existent-serial-5554")
 
-        with pytest.raises(MidsceneRPCError):
+        with pytest.raises(RuntimeError, match="midscene_config is required"):
             _ = device.ai
 
     def test_close_midscene_safe_before_ai_accessed(self):
@@ -500,6 +519,27 @@ class TestMidsceneMixinInit:
         device = MyDevice()
         device.close_midscene()
         device.close_midscene()
+
+
+class TestDeviceDiscoveryHelper:
+    """验证真实设备发现辅助函数的错误处理。"""
+
+    def test_extract_connected_devices_raises_rpc_error(self):
+        with pytest.raises(RuntimeError, match="adb executable not found in PATH"):
+            _extract_connected_devices({
+                "error": {
+                    "message": "adb executable not found in PATH",
+                },
+            })
+
+    def test_pick_ready_device_id_prefers_online_device(self):
+        assert _pick_ready_device_id([
+            {"udid": "offline-1", "state": "offline"},
+            {"udid": "device-1", "state": "device"},
+        ]) == "device-1"
+
+    def test_pick_ready_device_id_returns_none_for_empty_list(self):
+        assert _pick_ready_device_id([]) is None
 
 
 # ─── Level 3：完整 AI 操作（需要真实 Android 设备 + AI Key）────────────────

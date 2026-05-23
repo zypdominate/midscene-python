@@ -11,11 +11,9 @@ AI 模型配置管理。
 model_family 对应 Midscene 的 MIDSCENE_MODEL_FAMILY 环境变量。
 """
 
-from __future__ import annotations
-
 import base64
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
