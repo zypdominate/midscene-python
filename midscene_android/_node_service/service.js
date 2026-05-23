@@ -14,11 +14,11 @@
 
 'use strict';
 
+const {execFile} = require('child_process');
 const http = require('http');
 const {
     AndroidAgent,
     AndroidDevice,
-    getConnectedDevices: listConnectedDevices,
 } = require('@midscene/android');
 // ─── Session 管理 ────────────────────────────────────────────────────────────
 
@@ -29,6 +29,55 @@ let sessionCounter = 0;
 
 function generateSessionId() {
     return `session_${Date.now()}_${++sessionCounter}`;
+}
+
+function runCommand(command, args, options = {}) {
+    return new Promise((resolve, reject) => {
+        execFile(command, args, {
+            windowsHide: true,
+            ...options,
+        }, (error, stdout, stderr) => {
+            if (error) {
+                error.stdout = stdout;
+                error.stderr = stderr;
+                reject(error);
+                return;
+            }
+            resolve({stdout, stderr});
+        });
+    });
+}
+
+function getAdbCommand(explicitPath) {
+    return explicitPath || 'adb';
+}
+
+function parseAdbDevicesOutput(stdout) {
+    const lines = stdout.split(/\r?\n/).map((line) => line.trim());
+    const headerIndex = lines.findIndex((line) => line.startsWith('List of devices'));
+    if (headerIndex < 0) {
+        throw new Error(`Unexpected output from adb devices: ${stdout}`);
+    }
+
+    return lines
+        .slice(headerIndex + 1)
+        .filter((line) => line && !line.startsWith('*'))
+        .map((line) => {
+            const [udid, state] = line.split(/\s+/);
+            return {udid, state};
+        })
+        .filter((device) => device.udid && device.state);
+}
+
+async function getConnectedDevicesViaAdb(explicitAdbPath) {
+    try {
+        const {stdout} = await runCommand(getAdbCommand(explicitAdbPath), ['devices'], {timeout: 60000});
+        return parseAdbDevicesOutput(stdout);
+    } catch (e) {
+        throw new Error(
+            `adb executable not found in PATH or failed to run. Ensure \`adb\` is available in the system PATH. Original error: ${e.message}`,
+        );
+    }
 }
 
 // ─── RPC Handlers ────────────────────────────────────────────────────────────
@@ -42,7 +91,7 @@ const handlers = {
     async createSession({deviceId, deviceOptions = {}, agentOptions = {}}) {
         const device = new AndroidDevice(deviceId, {
             autoDismissKeyboard: deviceOptions.autoDismissKeyboard ?? true,
-            androidAdbPath: deviceOptions.androidAdbPath,
+            androidAdbPath: getAdbCommand(deviceOptions.androidAdbPath),
             remoteAdbHost: deviceOptions.remoteAdbHost,
             remoteAdbPort: deviceOptions.remoteAdbPort,
         });
@@ -219,11 +268,11 @@ const handlers = {
     },
 
     /**
-     * 列出 ADB 已连接设备（对应 @midscene/android 的 getConnectedDevices）
+     * 列出 ADB 已连接设备
      * 返回 devices[].udid，与 adb devices 中的 serial 一致
      */
-    async getConnectedDevices() {
-        const devices = await listConnectedDevices();
+    async getConnectedDevices({androidAdbPath} = {}) {
+        const devices = await getConnectedDevicesViaAdb(androidAdbPath);
         return {
             devices: devices.map((d) => ({
                 udid: d.udid,
