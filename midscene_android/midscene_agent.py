@@ -32,7 +32,7 @@ class MidsceneAgent:
             params["sessionId"] = self._session_id
 
         resp = requests.post(
-            f"http://127.0.0.1:{self._por}/rpc",
+            f"http://127.0.0.1:{self._port}/rpc",
             json={
                 "jsonrpc": "2.0",
                 "id": str(uuid.uuid4()),

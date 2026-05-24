@@ -3,65 +3,49 @@
  *
  * 作为 Python 侧 MidsceneAgent 的后端，通过 JSON-RPC 2.0 over HTTP 通信。
  * 由 Python 的 NodeServiceManager 启动，进程级单例，支持多 session 并发。
- *
- * 环境变量（由 Python 侧注入）：
- *   PORT                      - 监听端口（必须）
- *   MIDSCENE_MODEL_BASE_URL   - AI 模型 base URL
- *   MIDSCENE_MODEL_API_KEY    - AI 模型 API Key（已解码）
- *   MIDSCENE_MODEL_NAME       - 模型名称
- *   MIDSCENE_MODEL_FAMILY     - 模型家族（openai/qwen/doubao 等）
- */
+ **/
 
 'use strict';
 
 const {execFile} = require('child_process');
 const http = require('http');
-const {
-    AndroidAgent,
-    AndroidDevice,
-} = require('@midscene/android');
-// ─── Session 管理 ────────────────────────────────────────────────────────────
+const {AndroidAgent, AndroidDevice} = require('@midscene/android');
 
-/** @type {Map<string, { device: AndroidDevice, agent: AndroidAgent }>} */
 const sessions = new Map();
-
 let sessionCounter = 0;
 
-function generateSessionId() {
-    return `session_${Date.now()}_${++sessionCounter}`;
+function nextSessionId() {
+    sessionCounter += 1;
+    return `session_${Date.now()}_${sessionCounter}`;
 }
 
 function runCommand(command, args, options = {}) {
     return new Promise((resolve, reject) => {
-        execFile(command, args, {
-            windowsHide: true,
-            ...options,
-        }, (error, stdout, stderr) => {
+        execFile(command, args, {...options, windowsHide: true}, (error, stdout, stderr) => {
             if (error) {
                 error.stdout = stdout;
                 error.stderr = stderr;
                 reject(error);
                 return;
             }
-            resolve({stdout, stderr});
+            resolve(stdout);
         });
     });
 }
 
-function getAdbCommand(explicitPath) {
-    return explicitPath || 'adb';
+function getSession(sessionId) {
+    const session = sessions.get(sessionId);
+    if (!session) {
+        throw new Error(`Session not found: ${sessionId}`);
+    }
+    return session;
 }
 
-function parseAdbDevicesOutput(stdout) {
-    const lines = stdout.split(/\r?\n/).map((line) => line.trim());
-    const headerIndex = lines.findIndex((line) => line.startsWith('List of devices'));
-    if (headerIndex < 0) {
-        throw new Error(`Unexpected output from adb devices: ${stdout}`);
-    }
-
-    return lines
-        .slice(headerIndex + 1)
-        .filter((line) => line && !line.startsWith('*'))
+function parseAdbDevices(stdout) {
+    return stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('List of devices') && !line.startsWith('*'))
         .map((line) => {
             const [udid, state] = line.split(/\s+/);
             return {udid, state};
@@ -69,14 +53,12 @@ function parseAdbDevicesOutput(stdout) {
         .filter((device) => device.udid && device.state);
 }
 
-async function getConnectedDevicesViaAdb(explicitAdbPath) {
+async function listConnectedDevices() {
     try {
-        const {stdout} = await runCommand(getAdbCommand(explicitAdbPath), ['devices'], {timeout: 60000});
-        return parseAdbDevicesOutput(stdout);
-    } catch (e) {
-        throw new Error(
-            `adb executable not found in PATH or failed to run. Ensure \`adb\` is available in the system PATH. Original error: ${e.message}`,
-        );
+        const stdout = await runCommand('adb', ['devices'], {timeout: 60000});
+        return parseAdbDevices(stdout);
+    } catch (error) {
+        throw new Error(`Failed to run adb devices: ${error.message}`);
     }
 }
 
@@ -85,26 +67,13 @@ async function getConnectedDevicesViaAdb(explicitAdbPath) {
 const handlers = {
     /**
      * 创建设备会话，对应 JS 侧 new AndroidDevice() + new AndroidAgent()
-     * params: { deviceId, agentOptions? }
-     * agentOptions 透传给 AndroidAgent 构造函数（generateReport 等）
+     * params: { deviceId }
      */
-    async createSession({deviceId, deviceOptions = {}, agentOptions = {}}) {
-        const device = new AndroidDevice(deviceId, {
-            autoDismissKeyboard: deviceOptions.autoDismissKeyboard ?? true,
-            androidAdbPath: getAdbCommand(deviceOptions.androidAdbPath),
-            remoteAdbHost: deviceOptions.remoteAdbHost,
-            remoteAdbPort: deviceOptions.remoteAdbPort,
-        });
+    async createSession({deviceId}) {
+        const device = new AndroidDevice(deviceId);
         await device.connect();
-
-        const agent = new AndroidAgent(device, {
-            generateReport: agentOptions.generateReport ?? false,
-            autoPrintReportMsg: agentOptions.autoPrintReportMsg ?? false,
-            aiActContext: agentOptions.aiActContext,
-            waitAfterAction: agentOptions.waitAfterAction,
-        });
-
-        const sessionId = generateSessionId();
+        const agent = new AndroidAgent(device);
+        const sessionId = nextSessionId();
         sessions.set(sessionId, {device, agent});
         return {sessionId};
     },
@@ -113,13 +82,17 @@ const handlers = {
      * 销毁会话，释放设备连接
      */
     async destroySession({sessionId}) {
-        const sess = sessions.get(sessionId);
-        if (!sess) return {ok: true};
+        const session = sessions.get(sessionId);
+        if (!session) {
+            return {ok: true};
+        }
         try {
-            await sess.agent.destroy?.();
-            await sess.device.disconnect?.();
-        } catch (e) {
-            // 忽略断开连接时的错误
+            await session.agent.destroy?.();
+        } catch (_) {
+        }
+        try {
+            await session.device.disconnect?.();
+        } catch (_) {
         }
         sessions.delete(sessionId);
         return {ok: true};
@@ -129,11 +102,10 @@ const handlers = {
 
     /**
      * agent.aiAct() - AI 自动规划并执行
-     * params: { sessionId, prompt, options? }
+     * params: { sessionId, prompt }
      */
-    async aiAct({sessionId, prompt, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        await agent.aiAct(prompt, options);
+    async aiAct({sessionId, prompt}) {
+        await getSession(sessionId).agent.aiAct(prompt);
         return {ok: true};
     },
 
@@ -141,90 +113,76 @@ const handlers = {
 
     /**
      * agent.aiTap() - 点击
-     * params: { sessionId, locate, options? }
+     * params: { sessionId, locate }
      */
-    async aiTap({sessionId, locate, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        await agent.aiTap(locate, options);
+    async aiTap({sessionId, locate}) {
+        await getSession(sessionId).agent.aiTap(locate);
         return {ok: true};
     },
 
     /**
      * agent.aiInput() - 输入文本
-     * params: { sessionId, locate, text, options? }
+     * params: { sessionId, locate, text }
      */
-    async aiInput({sessionId, locate, text, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        await agent.aiInput(locate, text, options);
+    async aiInput({sessionId, locate, value}) {
+        await getSession(sessionId).agent.aiInput(locate, value);
         return {ok: true};
     },
 
     /**
      * agent.aiClearInput() - 清空输入框
-     * params: { sessionId, locate, options? }
+     * params: { sessionId, locate }
      */
-    async aiClearInput({sessionId, locate, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        await agent.aiClearInput(locate, options);
+    async aiClearInput({sessionId, locate}) {
+        await getSession(sessionId).agent.aiClearInput(locate);
         return {ok: true};
     },
 
     /**
      * agent.aiScroll() - 滚动
-     * params: { sessionId, locate, direction, scrollType?, distance?, options? }
+     *     * params: { sessionId, locate, direction, scrollType?, distance? }
      */
-    async aiScroll({sessionId, locate, direction, scrollType, distance, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        await agent.aiScroll(
-            {locate, direction, scrollType, distance},
-            options,
-        );
+    async aiScroll({sessionId, locate, direction, scrollType, distance}) {
+        const options = {};
+        if (direction !== undefined) options.direction = direction;
+        if (scrollType !== undefined) options.scrollType = scrollType;
+        if (distance !== undefined) options.distance = distance;
+        await getSession(sessionId).agent.aiScroll(locate, options);
         return {ok: true};
     },
 
-    /**
-     * agent.aiLongPress() - 长按
-     */
-    async aiLongPress({sessionId, locate, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        await agent.aiLongPress(locate, options);
+    async aiPinch({sessionId, locate, direction, distance, duration}) {
+        const options = {};
+        if (direction !== undefined) options.direction = direction;
+        if (distance !== undefined) options.distance = distance;
+        if (duration !== undefined) options.duration = duration;
+        await getSession(sessionId).agent.aiPinch(locate, options);
         return {ok: true};
     },
 
-    /**
-     * agent.aiDoubleClick() - 双击
-     */
-    async aiDoubleClick({sessionId, locate, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        await agent.aiDoubleClick(locate, options);
+    async aiLongPress({sessionId, locate, duration}) {
+        const options = duration === undefined ? undefined : {duration};
+        await getSession(sessionId).agent.aiLongPress(locate, options);
         return {ok: true};
     },
 
-    /**
-     * agent.aiKeyboardPress() - 按键
-     * params: { sessionId, key }  key: 'Enter'|'Back'|'Home'|...
-     */
-    async aiKeyboardPress({sessionId, key, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        await agent.aiKeyboardPress(key, options);
+    async aiDoubleClick({sessionId, locate}) {
+        await getSession(sessionId).agent.aiDoubleClick(locate);
         return {ok: true};
     },
 
-    // ── Utility ─────────────────────────────────────────────────────────────────
-
-    /**
-     * agent.aiAssert() - AI 视觉断言
-     * 不抛异常，返回 { pass, reason } 由 Python 侧决定是否 raise
-     */
-    async aiAssert({sessionId, assertion, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        try {
-            await agent.aiAssert(assertion, undefined, options);
-            return {pass: true, reason: null};
-        } catch (e) {
-            // aiAssert 失败时抛出，我们捕获并转为结构化结果
-            return {pass: false, reason: e.message};
+    async aiKeyboardPress({sessionId, locate, keyName}) {
+        if (locate === undefined || locate === null) {
+            await getSession(sessionId).agent.aiKeyboardPress(keyName);
+        } else {
+            await getSession(sessionId).agent.aiKeyboardPress(locate, {keyName});
         }
+        return {ok: true};
+    },
+
+    async aiAsk({sessionId, prompt}) {
+        const data = await getSession(sessionId).agent.aiAsk(prompt);
+        return {data};
     },
 
     /**
@@ -232,72 +190,63 @@ const handlers = {
      * params: { sessionId, schema }
      * schema: Midscene query schema 字符串，如 '{title: string, price: number}[]'
      */
-    async aiQuery({sessionId, schema, options = {}}) {
-        const {agent} = _getSession(sessionId);
-        const data = await agent.aiQuery(schema, options);
+    async aiQuery({sessionId, dataDemand}) {
+        const data = await getSession(sessionId).agent.aiQuery(dataDemand);
         return {data};
     },
 
-    /**
-     * agent.aiWaitFor() - 等待条件满足
-     * params: { sessionId, condition, timeoutMs?, checkIntervalMs? }
-     */
-    async aiWaitFor({sessionId, condition, timeoutMs = 15000, checkIntervalMs}) {
-        const {agent} = _getSession(sessionId);
-        const opts = {timeoutMs};
-        if (checkIntervalMs !== undefined) opts.checkIntervalMs = checkIntervalMs;
-        await agent.aiWaitFor(condition, opts);
+    async aiBoolean({sessionId, prompt}) {
+        const data = await getSession(sessionId).agent.aiBoolean(prompt);
+        return {data};
+    },
+
+    async aiNumber({sessionId, prompt}) {
+        const data = await getSession(sessionId).agent.aiNumber(prompt);
+        return {data};
+    },
+
+    async aiString({sessionId, prompt}) {
+        const data = await getSession(sessionId).agent.aiString(prompt);
+        return {data};
+    },
+
+    async aiLocate({sessionId, locate}) {
+        const data = await getSession(sessionId).agent.aiLocate(locate);
+        return {data};
+    },
+
+    async aiAssert({sessionId, assertion}) {
+        try {
+            await getSession(sessionId).agent.aiAssert(assertion);
+            return {pass: true, reason: null};
+        } catch (error) {
+            return {pass: false, reason: error.message};
+        }
+    },
+
+    async aiWaitFor({sessionId, assertion, timeoutMs}) {
+        await getSession(sessionId).agent.aiWaitFor(assertion, {timeoutMs});
         return {ok: true};
     },
 
-    /**
-     * AndroidAgent.openUrl() - 打开网页或 App
-     * params: { sessionId, uri }
-     */
-    async openUrl({sessionId, uri}) {
-        const {agent} = _getSession(sessionId);
-        await agent.openUrl(uri);
-        return {ok: true};
+    async runAdbShell({sessionId, command, timeoutMs}) {
+        const output = await getSession(sessionId).agent.runAdbShell(
+            command,
+            timeoutMs === undefined ? undefined : {timeout: timeoutMs},
+        );
+        return {output};
     },
 
-    /**
-     * 健康检查，Python 侧启动时轮询此接口确认服务就绪
-     */
+    async getConnectedDevices() {
+        return {devices: await listConnectedDevices()};
+    },
+
     ping() {
         return {pong: true, pid: process.pid};
     },
-
-    /**
-     * 列出 ADB 已连接设备
-     * 返回 devices[].udid，与 adb devices 中的 serial 一致
-     */
-    async getConnectedDevices({androidAdbPath} = {}) {
-        const devices = await getConnectedDevicesViaAdb(androidAdbPath);
-        return {
-            devices: devices.map((d) => ({
-                udid: d.udid,
-                state: d.state,
-            })),
-        };
-    },
-
 };
 
-// ─── 工具函数 ────────────────────────────────────────────────────────────────
-
-
-function _getSession(sessionId) {
-    const sess = sessions.get(sessionId);
-    if (!sess) {
-        throw new Error(`Session not found: ${sessionId}`);
-    }
-    return sess;
-}
-
-// ─── HTTP 服务器 ─────────────────────────────────────────────────────────────
-
 const server = http.createServer(async (req, res) => {
-    // 只接受 POST /rpc
     if (req.method !== 'POST' || req.url !== '/rpc') {
         res.writeHead(404, {'Content-Type': 'application/json'});
         res.end(JSON.stringify({error: 'Not found'}));
@@ -314,8 +263,8 @@ const server = http.createServer(async (req, res) => {
             req.on('end', () => resolve(chunks));
             req.on('error', reject);
         });
-    } catch (e) {
-        res.writeHead(400);
+    } catch (_) {
+        res.writeHead(400, {'Content-Type': 'application/json'});
         res.end(JSON.stringify({error: 'Failed to read request body'}));
         return;
     }
@@ -323,8 +272,8 @@ const server = http.createServer(async (req, res) => {
     let rpcRequest;
     try {
         rpcRequest = JSON.parse(body);
-    } catch (e) {
-        res.writeHead(400);
+    } catch (_) {
+        res.writeHead(400, {'Content-Type': 'application/json'});
         res.end(JSON.stringify({error: 'Invalid JSON'}));
         return;
     }
@@ -341,13 +290,12 @@ const server = http.createServer(async (req, res) => {
         };
     } else {
         try {
-            const result = await handler(params);
-            rpcResponse = {jsonrpc, id, result};
-        } catch (e) {
+            rpcResponse = {jsonrpc, id, result: await handler(params)};
+        } catch (error) {
             rpcResponse = {
                 jsonrpc,
                 id,
-                error: {code: -1, message: e.message, stack: e.stack},
+                error: {code: -1, message: error.message, stack: error.stack},
             };
         }
     }
@@ -356,24 +304,19 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify(rpcResponse));
 });
 
-// ─── 启动 ────────────────────────────────────────────────────────────────────
-
 const PORT = parseInt(process.env.PORT || '0', 10);
 
 server.listen(PORT, '127.0.0.1', () => {
     const addr = server.address();
-    // 输出实际端口（PORT=0 时由 OS 分配），Python 侧解析此行获取端口
-    // 格式固定为 MIDSCENE_SERVICE_READY:{port}，方便 Python 侧用 startswith 解析
     process.stdout.write(`MIDSCENE_SERVICE_READY:${addr.port}\n`);
 });
 
-// 优雅退出：清理所有 session
 async function gracefulShutdown() {
-    const destroyAll = Array.from(sessions.keys()).map((id) =>
-        handlers.destroySession({sessionId: id}).catch(() => {
+    const tasks = Array.from(sessions.keys()).map((sessionId) =>
+        handlers.destroySession({sessionId}).catch(() => {
         }),
     );
-    await Promise.allSettled(destroyAll);
+    await Promise.allSettled(tasks);
     server.close(() => process.exit(0));
 }
 

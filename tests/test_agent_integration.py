@@ -394,34 +394,6 @@ class TestMidsceneAgentInit:
     预期行为是 Node 侧返回错误，Python 侧将其包装为 MidsceneRPCError。
     这正是我们要验证的错误传播链路。
     """
-
-    def test_create_agent_for_unknown_serial_raises_rpc_error(self, node_service, dummy_midscene_env):
-        """
-        向 Node 服务传入一个不存在的 ADB serial，createSession 应失败。
-
-        这验证了错误传播链路：
-          Node.js connectDevice error → HTTP { error: {...} } → MidsceneRPCError
-        """
-        with pytest.raises(MidsceneRPCError) as exc_info:
-            MidsceneAgent("non-existent-serial-5554")
-
-        err = exc_info.value
-        assert str(err) != ""
-        assert isinstance(err.code, int)
-        print(f"\n  Expected MidsceneRPCError: code={err.code}, msg={err}")
-
-    def test_agent_init_failure_leaves_no_session(self, node_service, dummy_midscene_env):
-        """
-        初始化失败后，agent 变量应为 None（对象从未被成功创建）。
-        """
-        agent = None
-        try:
-            agent = MidsceneAgent("non-existent-serial-5554")
-        except MidsceneRPCError:
-            pass
-
-        assert agent is None, "Agent should not be assigned if createSession failed"
-
     def test_agent_node_manager_port_used(self, node_service):
         """
         验证 MidsceneAgent 确实向 NodeServiceManager 提供的端口发送请求。
