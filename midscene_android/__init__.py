@@ -23,18 +23,17 @@ MidsceneRPCError - RPC 通信异常
     )
 
     agent = MidsceneAgent("emulator-5554", config)
-    agent.act("点击登录按钮")
-    agent.assert_("已进入用户首页")
+    agent.ai_action("点击登录按钮")
+    agent.ai_assert("已进入用户首页")
     agent.destroy()
 """
 
-from .midscene_agent import MidsceneAgent, get_connected_devices
 from .config import MidsceneConfig
 from .exceptions import MidsceneError, MidsceneRPCError, MidsceneSetupError
+from .midscene_agent import MidsceneAgent
 
 __all__ = [
     "MidsceneAgent",
-    "get_connected_devices",
     "MidsceneConfig",
     "MidsceneError",
     "MidsceneRPCError",

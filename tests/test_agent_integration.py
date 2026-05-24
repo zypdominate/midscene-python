@@ -105,19 +105,6 @@ def _pick_ready_device_id(devices: list[dict]) -> str | None:
 
 
 @pytest.fixture
-def dummy_midscene_env():
-    snapshot = dict(os.environ)
-    os.environ["MIDSCENE_MODEL_BASE_URL"] = "https://placeholder.example.com/v1"
-    os.environ["MIDSCENE_MODEL_API_KEY"] = "dummy-key"
-    os.environ["MIDSCENE_MODEL_NAME"] = "placeholder-model"
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(snapshot)
-
-
-@pytest.fixture
 def node_cache_snapshot():
     """
     备份真实 node_service 缓存中的元数据文件，测试结束后还原。
@@ -366,25 +353,6 @@ class TestNodeServiceRPC:
         )
         assert resp.status_code == 404
 
-    def test_get_connected_devices_returns_list(self, node_service):
-        """getConnectedDevices 应返回 devices 列表（可为空）。"""
-        resp = requests.post(
-            f"http://127.0.0.1:{node_service.port}/rpc",
-            json={
-                "jsonrpc": "2.0",
-                "id": str(uuid.uuid4()),
-                "method": "getConnectedDevices",
-                "params": {},
-            },
-            timeout=60,
-        )
-        devices = resp.json().get("result", {}).get("devices", [])
-        assert isinstance(devices, list)
-        for d in devices:
-            assert "udid" in d
-            assert "state" in d
-        print(f"\n  ADB connected devices: {devices}")
-
     def test_concurrent_pings_all_succeed(self, node_service):
         """并发 RPC 请求应全部正常返回，不出现竞态。"""
         results: list[bool] = []
@@ -568,21 +536,20 @@ class TestAIActionsOnRealDevice:
         aiAct：AI 自动规划并执行。
         目标描述：等待设备处于稳定状态（不要求特定 App，兼容所有设备）。
         """
-        real_agent.act("等待当前页面完全加载，不要做任何操作")
+        real_agent.ai_action("等待当前页面完全加载，不要做任何操作")
 
     def test_tap_element(self, real_agent):
         """
         aiTap：AI 定位并点击屏幕上的元素。
-        使用 deep_think=False 保证速度。
         """
-        real_agent.tap("屏幕中央区域")
+        real_agent.ai_tap("屏幕中央区域")
 
     def test_assert_screen_visible(self, real_agent):
         """
         aiAssert：AI 视觉断言。
         验证设备屏幕当前是可见的（通用断言，适用于任何设备状态）。
         """
-        real_agent.assert_("设备屏幕已亮起，可以看到 UI 内容")
+        real_agent.ai_assert("设备屏幕已亮起，可以看到 UI 内容")
 
     def test_assert_fails_with_wrong_condition(self, real_agent):
         """
@@ -590,7 +557,7 @@ class TestAIActionsOnRealDevice:
         验证 Python 侧正确区分了"AI 返回 pass=False"与"RPC 调用失败"。
         """
         with pytest.raises(AssertionError) as exc_info:
-            real_agent.assert_("屏幕上有一只独角兽在飞翔")
+            real_agent.ai_assert("屏幕上有一只独角兽在飞翔")
         assert "AI assertion failed" in str(exc_info.value)
         print(f"\n  Expected assertion failure: {exc_info.value}")
 
@@ -599,7 +566,7 @@ class TestAIActionsOnRealDevice:
         aiQuery：从当前屏幕提取结构化数据。
         schema 描述期望的数据结构，AI 返回 JSON。
         """
-        result = real_agent.query(
+        result = real_agent.ai_query(
             '"当前屏幕上可见的主要文字内容，如果没有则返回空字符串"'
         )
         assert result is not None or result is None
@@ -607,14 +574,14 @@ class TestAIActionsOnRealDevice:
 
     def test_scroll_down(self, real_agent):
         """aiScroll：向下滚动当前页面。"""
-        real_agent.scroll("当前页面", direction="down", distance="small")
+        real_agent.ai_scroll("当前页面", direction="down", distance="small")
 
     def test_wait_for_condition(self, real_agent):
         """
         aiWaitFor：等待条件满足。
         等待屏幕稳定（最多 5 秒），这在大多数设备上应该立即成立。
         """
-        real_agent.wait_for("屏幕 UI 处于稳定状态，没有加载动画", timeout_ms=5000)
+        real_agent.ai_wait_for("屏幕 UI 处于稳定状态，没有加载动画", timeout_ms=5000)
 
     def test_session_lifecycle_create_and_destroy(self, ai_config):
         """
