@@ -15,7 +15,7 @@ from pathlib import Path
 
 import requests
 
-from midscene_android.service import NodeServiceManager
+from midscene_android.node_service import NodeServiceManager
 
 # 确保从项目根导入，而非已安装的包
 sys.path.insert(0, str(Path(__file__).parent.parent))

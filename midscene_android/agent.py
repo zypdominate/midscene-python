@@ -6,7 +6,7 @@ import requests
 
 from .config import MidsceneConfig
 from .exceptions import MidsceneRPCError
-from .service import NodeServiceManager
+from .node_service import NodeServiceManager
 
 _TIMEOUT = 120
 

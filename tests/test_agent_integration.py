@@ -34,7 +34,7 @@ from midscene_android.agent import MidsceneAgent
 from midscene_android.config import MidsceneConfig
 from midscene_android.exceptions import MidsceneRPCError
 from midscene_android.mixin import MidsceneMixin
-from midscene_android.service import NodeServiceManager
+from midscene_android.node_service import NodeServiceManager
 
 # ─── 标记定义 ─────────────────────────────────────────────────────────────────
 
