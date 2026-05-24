@@ -1,7 +1,5 @@
 """midscene_android 异常类。"""
 
-from __future__ import annotations
-
 
 class MidsceneError(Exception):
     """midscene_android 的基础异常。"""
