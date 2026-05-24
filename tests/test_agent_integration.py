@@ -22,7 +22,6 @@
   pytest tests/test_agent_integration.py -v -s -m device
 """
 
-import os
 import threading
 import uuid
 
@@ -30,9 +29,8 @@ import pytest
 import requests
 
 from midscene_android import runtime
-from midscene_android.midscene_agent import MidsceneAgent
 from midscene_android.config import MidsceneConfig
-from midscene_android.exceptions import MidsceneRPCError
+from midscene_android.midscene_agent import MidsceneAgent
 from midscene_android.node_service import NodeServiceManager
 
 # ─── 标记定义 ─────────────────────────────────────────────────────────────────
@@ -394,6 +392,7 @@ class TestMidsceneAgentInit:
     预期行为是 Node 侧返回错误，Python 侧将其包装为 MidsceneRPCError。
     这正是我们要验证的错误传播链路。
     """
+
     def test_agent_node_manager_port_used(self, node_service):
         """
         验证 MidsceneAgent 确实向 NodeServiceManager 提供的端口发送请求。
@@ -432,33 +431,7 @@ class TestMidsceneAgentInit:
 # ─── Level 3：完整 AI 操作（需要真实 Android 设备 + AI Key）────────────────
 
 @pytest.fixture(scope="module")
-def ai_config():
-    """
-    从环境变量读取真实 AI 模型配置。
-
-    运行 Level 3 测试前，设置以下环境变量：
-      MIDSCENE_MODEL_BASE_URL  - AI API 地址
-      MIDSCENE_MODEL_API_KEY   - API Key
-      MIDSCENE_MODEL_NAME      - 模型名称
-      MIDSCENE_MODEL_FAMILY    - 模型家族（openai / qwen / doubao 等）
-    """
-    import dotenv
-    dotenv.load_dotenv()
-    missing = [
-        v for v in (
-            "MIDSCENE_MODEL_BASE_URL",
-            "MIDSCENE_MODEL_API_KEY",
-            "MIDSCENE_MODEL_NAME",
-        )
-        if not os.environ.get(v)
-    ]
-    if missing:
-        pytest.skip(f"AI config env vars not set: {', '.join(missing)}")
-    return MidsceneConfig.from_env()
-
-
-@pytest.fixture(scope="module")
-def real_agent(ai_config):
+def real_agent():
     """
     完整初始化流程：
       1. NodeServiceManager 启动 Node 子进程
@@ -467,6 +440,7 @@ def real_agent(ai_config):
     """
     _reset_singleton()
 
+    ai_config = MidsceneConfig.from_env()
     device_id = _require_connected_device_id(ai_config)
     agent = MidsceneAgent(device_id)
     print(f"\n  Using Android device: {agent._device_id}")
@@ -574,4 +548,3 @@ class TestAIActionsOnRealDevice:
         assert agent.is_closed() is True
         assert agent._session_id is None
         print(f"\n  Session {session_id} created and destroyed successfully")
-
