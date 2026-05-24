@@ -41,7 +41,7 @@ class MidsceneConfig:
             )
 
     @classmethod
-    def from_env(cls) -> MidsceneConfig:
+    def from_env(cls) -> "MidsceneConfig":
         return cls()
 
     def to_node_env(self) -> dict[str, str]:

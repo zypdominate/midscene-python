@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 # ─── 路径常量 ──────────────────────────────────────────────────────────────────
 
 PACKAGE_DIR = Path(__file__).parent
-NODE_BIN_DIR = PACKAGE_DIR / "_runtime" / "bin"
-NPM_CLI = PACKAGE_DIR / "_runtime" / "npm" / "bin" / "npm-cli.js"
-NODE_SVC_SRC = PACKAGE_DIR / "_node_service"  # package.json + service.js
+NODE_BIN_DIR = PACKAGE_DIR / "_node_driver" / "bin"
+NPM_CLI = PACKAGE_DIR / "_node_driver" / "npm" / "bin" / "npm-cli.js"
+NODE_SVC_SRC = PACKAGE_DIR / "_node_driver" / "src"  # package.json + service.js
 
 CACHE_DIR = Path.home() / ".midscene_android"
 NODE_SVC_CACHE = CACHE_DIR / "node_service"  # npm install 目标目录
