@@ -20,7 +20,7 @@ def midscene_config() -> MidsceneConfig:
     # AI 模型配置（实际项目中从环境变量或配置文件读取）
     MIDSCENE_CONFIG = MidsceneConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        api_key="sk-your-api-key-here",  # 明文或 base64 均可
+        api_key="sk-your-api-key-here",
         model_name="qwen-vl-max",
         model_family="qwen",
     )

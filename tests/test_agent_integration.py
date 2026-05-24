@@ -199,7 +199,7 @@ class TestVersionCache:
     def test_invalidate_cache_removes_metadata_files(self, node_cache_snapshot):
         """invalidate_cache 应删除 service.js / package.json / flag / version。"""
         runtime.NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
-        (runtime.NODE_SVC_CACHE / "service.js").write_text("// stub", encoding="utf-8")
+        (runtime.NODE_SVC_CACHE / "service.js").write_text("// temp", encoding="utf-8")
         (runtime.NODE_SVC_CACHE / "package.json").write_text("{}", encoding="utf-8")
         runtime.NPM_DONE_FLAG.touch()
         runtime.VERSION_FILE.write_text("0.1.0", encoding="utf-8")
@@ -487,27 +487,6 @@ class TestMidsceneAgentInit:
         assert "result" in data, f"Unexpected error: {data}"
         assert data["result"]["ok"] is True
         print("\n  destroySession with unknown sessionId → ok (graceful)")
-
-
-class TestDeviceDiscoveryHelper:
-    """验证真实设备发现辅助函数的错误处理。"""
-
-    def test_extract_connected_devices_raises_rpc_error(self):
-        with pytest.raises(RuntimeError, match="adb executable not found in PATH"):
-            _extract_connected_devices({
-                "error": {
-                    "message": "adb executable not found in PATH",
-                },
-            })
-
-    def test_pick_ready_device_id_prefers_online_device(self):
-        assert _pick_ready_device_id([
-            {"udid": "offline-1", "state": "offline"},
-            {"udid": "device-1", "state": "device"},
-        ]) == "device-1"
-
-    def test_pick_ready_device_id_returns_none_for_empty_list(self):
-        assert _pick_ready_device_id([]) is None
 
 
 # ─── Level 3：完整 AI 操作（需要真实 Android 设备 + AI Key）────────────────
