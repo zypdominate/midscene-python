@@ -45,6 +45,17 @@ def get_node_bin() -> Path:
             f"Bundled Node binary not found: {path}\n"
             f"Run: python scripts/fetch_node_binaries.py"
         )
+
+    if system != "windows":
+        # 确保二进制文件在非 Windows 系统下具有可执行权限
+        # （防止 pip install 或解压 tar 包时丢失 +x 权限）
+        if not os.access(path, os.X_OK):
+            try:
+                path.chmod(0o755)
+                logger.debug("Added executable permission to %s", path)
+            except OSError as e:
+                logger.warning("Failed to add executable permission to %s: %s", path, e)
+
     return path
 
 

@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "midscene-android"
@@ -20,8 +20,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Testing",
 ]
-# 故意保持零依赖：只用标准库，降低用户环境冲突风险
-dependencies = []
+dependencies = [
+    "requests>=2.28",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -47,13 +48,16 @@ include = ["midscene_android*"]
 
 [tool.setuptools.package-data]
 midscene_android = [
-    # 各平台 Node 可执行文件
+    # 平台 Node 可执行文件（构建时只保留目标平台的文件，其余已删除）
     "_runtime/bin/node-linux-x64",
     "_runtime/bin/node-linux-arm64",
     "_runtime/bin/node-darwin-x64",
     "_runtime/bin/node-darwin-arm64",
     "_runtime/bin/node-win32-x64.exe",
-    # Node.js 服务代码
+    "_runtime/bin/node.cmd",          # Windows PATH shim
+    # 内置 npm（npm install 时使用，无需系统 npm）
+    "_runtime/npm/**",
+    # Node.js RPC 服务源码
     "_node_service/package.json",
     "_node_service/service.js",
 ]
