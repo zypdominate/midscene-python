@@ -30,7 +30,7 @@ import pytest
 import requests
 
 from midscene_android import runtime
-from midscene_android.agent import MidsceneAgent
+from midscene_android.midscene_agent import MidsceneAgent
 from midscene_android.config import MidsceneConfig
 from midscene_android.exceptions import MidsceneRPCError
 from midscene_android.mixin import MidsceneMixin

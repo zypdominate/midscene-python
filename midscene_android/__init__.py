@@ -38,7 +38,7 @@ MidsceneRPCError - RPC 通信异常
         device.ai.assert_("已进入用户首页")
 """
 
-from .agent import MidsceneAgent
+from .midscene_agent import MidsceneAgent
 from .config import MidsceneConfig
 from .exceptions import MidsceneError, MidsceneRPCError, MidsceneSetupError
 from .mixin import MidsceneMixin

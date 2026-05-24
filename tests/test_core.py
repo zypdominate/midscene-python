@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from midscene_android.agent import MidsceneAgent, MidsceneRPCError
+from midscene_android.midscene_agent import MidsceneAgent, MidsceneRPCError
 from midscene_android.config import MidsceneConfig, _is_base64, _to_base64, _from_base64
 from midscene_android.mixin import MidsceneMixin
 

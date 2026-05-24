@@ -35,7 +35,7 @@ import logging
 from typing import Optional
 
 from .node_service import NodeServiceManager
-from .agent import MidsceneAgent
+from .midscene_agent import MidsceneAgent
 from .config import MidsceneConfig
 
 logger = logging.getLogger(__name__)
