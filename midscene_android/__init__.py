@@ -7,24 +7,13 @@ midscene_android
 公开 API
 --------
 MidsceneConfig   - AI 模型配置
-MidsceneMixin    - 混入类，为设备类添加 .ai property
-MidsceneAgent    - AI 操作接口（通常通过 device.ai 访问，不直接实例化）
+MidsceneAgent    - AI 操作接口
 MidsceneError    - 基础异常
 MidsceneRPCError - RPC 通信异常
 
 快速开始
 --------
-    from midscene_android import MidsceneMixin, MidsceneConfig
-
-    class MyDevice(MidsceneMixin):
-        def __init__(self, device_id, *, midscene_config=None):
-            self.init_midscene(device_id, config=midscene_config)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            self.close_midscene()
+    from midscene_android import MidsceneAgent, MidsceneConfig
 
     config = MidsceneConfig(
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -33,20 +22,20 @@ MidsceneRPCError - RPC 通信异常
         model_family="qwen",
     )
 
-    with MyDevice("emulator-5554", midscene_config=config) as device:
-        device.ai.act("点击登录按钮")
-        device.ai.assert_("已进入用户首页")
+    agent = MidsceneAgent("emulator-5554", config)
+    agent.act("点击登录按钮")
+    agent.assert_("已进入用户首页")
+    agent.destroy()
 """
 
-from .midscene_agent import MidsceneAgent
+from .midscene_agent import MidsceneAgent, get_connected_devices
 from .config import MidsceneConfig
 from .exceptions import MidsceneError, MidsceneRPCError, MidsceneSetupError
-from .mixin import MidsceneMixin
 
 __all__ = [
     "MidsceneAgent",
+    "get_connected_devices",
     "MidsceneConfig",
-    "MidsceneMixin",
     "MidsceneError",
     "MidsceneRPCError",
     "MidsceneSetupError",

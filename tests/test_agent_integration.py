@@ -33,7 +33,6 @@ from midscene_android import runtime
 from midscene_android.midscene_agent import MidsceneAgent
 from midscene_android.config import MidsceneConfig
 from midscene_android.exceptions import MidsceneRPCError
-from midscene_android.mixin import MidsceneMixin
 from midscene_android.node_service import NodeServiceManager
 
 # ─── 标记定义 ─────────────────────────────────────────────────────────────────
@@ -490,37 +489,6 @@ class TestMidsceneAgentInit:
         print("\n  destroySession with unknown sessionId → ok (graceful)")
 
 
-class TestMidsceneMixinInit:
-    """
-    验证 MidsceneMixin 在真实 NodeServiceManager 下的初始化路径。
-    """
-
-    def setup_method(self):
-        _reset_singleton()
-
-    def teardown_method(self):
-        _reset_singleton()
-
-    def test_ai_property_requires_config_before_node_access(self, dummy_midscene_env):
-        class SimulatedDevice(MidsceneMixin):
-            def __init__(self, device_id: str):
-                self.init_midscene(device_id)
-
-        device = SimulatedDevice("non-existent-serial-5554")
-
-        with pytest.raises(RuntimeError, match="midscene_config is required"):
-            _ = device.ai
-
-    def test_close_midscene_safe_before_ai_accessed(self):
-        class MyDevice(MidsceneMixin):
-            def __init__(self):
-                self.init_midscene("emulator-5554")
-
-        device = MyDevice()
-        device.close_midscene()
-        device.close_midscene()
-
-
 class TestDeviceDiscoveryHelper:
     """验证真实设备发现辅助函数的错误处理。"""
 
@@ -689,59 +657,3 @@ class TestAIActionsOnRealDevice:
         assert agent._session_id is None
         print(f"\n  Session {session_id} created and destroyed successfully")
 
-
-@device_mark
-class TestMidsceneMixinOnRealDevice:
-    """
-    验证 MidsceneMixin 在真实设备上的完整使用模式。
-    展示如何将 Midscene 集成到现有设备类中。
-    """
-
-    def test_full_device_lifecycle_with_context_manager(self, ai_config):
-        """
-        完整的设备生命周期演示：
-          1. 实现 MidsceneMixin 设备类
-          2. 用 context manager 管理生命周期
-          3. 通过 .ai property 访问所有 AI 能力
-        """
-        device_id = _require_connected_device_id(ai_config)
-
-        class MyAndroidDevice(MidsceneMixin):
-            def __init__(self, adb_serial: str, config: MidsceneConfig):
-                self.adb_serial = adb_serial
-                self.init_midscene(adb_serial)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_):
-                self.close_midscene()
-
-        with MyAndroidDevice(device_id, ai_config) as device:
-            assert device._midscene_agent is not None
-            assert device._midscene_agent._session_id is not None
-
-            device.ai.assert_("设备屏幕可见")
-            device.ai.wait_for("页面稳定", timeout_ms=3000)
-
-            print(f"\n  Device AI session: {device._midscene_agent._session_id}")
-
-        assert device._midscene_agent is None
-
-    def test_ai_property_cached_across_calls(self, ai_config):
-        """
-        多次访问 device.ai 应返回同一 MidsceneAgent 实例（懒加载缓存）。
-        """
-        device_id = _require_connected_device_id(ai_config)
-
-        class MyDevice(MidsceneMixin):
-            def __init__(self):
-                self.init_midscene(device_id)
-
-        device = MyDevice()
-        try:
-            agent_first = device.ai
-            agent_second = device.ai
-            assert agent_first is agent_second, ".ai must return the same cached instance"
-        finally:
-            device.close_midscene()

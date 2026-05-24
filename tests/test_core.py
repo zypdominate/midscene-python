@@ -15,7 +15,6 @@ import pytest
 
 from midscene_android.midscene_agent import MidsceneAgent, MidsceneRPCError
 from midscene_android.config import MidsceneConfig, _is_base64, _to_base64, _from_base64
-from midscene_android.mixin import MidsceneMixin
 
 
 # ─── 本地 RPC Stub 服务器 ─────────────────────────────────────────────────────
@@ -90,6 +89,9 @@ class _NodeManagerStub:
     def __init__(self, port: int) -> None:
         self.port = port
 
+    def ensure_started(self) -> None:
+        return None
+
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -114,7 +116,7 @@ def stub_rpc_server():
 def stub_node_manager(stub_rpc_server, monkeypatch):
     port, handler = stub_rpc_server
     nm = _NodeManagerStub(port)
-    monkeypatch.setattr("midscene_android.agent.NodeServiceManager", lambda config: nm)
+    monkeypatch.setattr("midscene_android.midscene_agent.NodeServiceManager", lambda config: nm)
     monkeypatch.setenv("MIDSCENE_MODEL_BASE_URL", "http://test/v1")
     monkeypatch.setenv("MIDSCENE_MODEL_API_KEY", "test-key")
     monkeypatch.setenv("MIDSCENE_MODEL_NAME", "test-model")
@@ -251,7 +253,7 @@ class TestMidsceneAgent:
         input_calls = [r for r in handler.requests_received if r["method"] == "aiInput"]
         assert len(input_calls) == 1
         assert input_calls[0]["params"]["locate"] == "用户名输入框"
-        assert input_calls[0]["params"]["text"] == "testuser"
+        assert input_calls[0]["params"]["value"] == "testuser"
 
     def test_scroll_sends_direction_and_locate(self, stub_node_manager):
         _, handler = stub_node_manager
@@ -272,7 +274,7 @@ class TestMidsceneAgent:
 
         key_calls = [r for r in handler.requests_received if r["method"] == "aiKeyboardPress"]
         assert len(key_calls) == 1
-        assert key_calls[0]["params"]["key"] == "Back"
+        assert key_calls[0]["params"]["keyName"] == "Back"
 
     def test_assert_passes_when_node_returns_true(self, stub_node_manager):
         _, handler = stub_node_manager
@@ -321,7 +323,7 @@ class TestMidsceneAgent:
 
     def test_rpc_error_raises_midscene_rpc_error(self, error_rpc_server, monkeypatch):
         nm = _NodeManagerStub(error_rpc_server)
-        monkeypatch.setattr("midscene_android.agent.NodeServiceManager", lambda config: nm)
+        monkeypatch.setattr("midscene_android.midscene_agent.NodeServiceManager", lambda config: nm)
         monkeypatch.setenv("MIDSCENE_MODEL_BASE_URL", "http://test/v1")
         monkeypatch.setenv("MIDSCENE_MODEL_API_KEY", "test-key")
         monkeypatch.setenv("MIDSCENE_MODEL_NAME", "test-model")
@@ -332,7 +334,7 @@ class TestMidsceneAgent:
 
     def test_rpc_error_carries_error_code(self, error_rpc_server, monkeypatch):
         nm = _NodeManagerStub(error_rpc_server)
-        monkeypatch.setattr("midscene_android.agent.NodeServiceManager", lambda config: nm)
+        monkeypatch.setattr("midscene_android.midscene_agent.NodeServiceManager", lambda config: nm)
         monkeypatch.setenv("MIDSCENE_MODEL_BASE_URL", "http://test/v1")
         monkeypatch.setenv("MIDSCENE_MODEL_API_KEY", "test-key")
         monkeypatch.setenv("MIDSCENE_MODEL_NAME", "test-model")
@@ -360,69 +362,3 @@ class TestMidsceneAgent:
                 f"sessionId missing in {req['method']}"
             )
 
-# ─── MidsceneMixin 测试 ───────────────────────────────────────────────────────
-
-class TestMidsceneMixin:
-
-    def test_ai_property_raises_without_init(self):
-        class BadDevice(MidsceneMixin):
-            pass
-
-        device = BadDevice()
-        with pytest.raises(RuntimeError, match="init_midscene"):
-            _ = device.ai
-
-    def test_close_midscene_safe_when_not_initialized(self):
-        class MyDevice(MidsceneMixin):
-            def __init__(self):
-                self.init_midscene("emulator-5554")
-
-        device = MyDevice()
-        device.close_midscene()  # 不应抛出
-
-    def test_close_midscene_calls_agent_destroy(self, stub_node_manager):
-        """close_midscene 应调用 agent.destroy() 并置空引用。"""
-        _, handler = stub_node_manager
-
-        class MyDevice(MidsceneMixin):
-            def __init__(self):
-                self.init_midscene("emulator-5554")
-
-        device = MyDevice()
-        agent = MidsceneAgent("emulator-5554")
-        device._midscene_agent = agent
-
-        device.close_midscene()
-
-        assert agent._session_id is None
-        assert device._midscene_agent is None
-
-        destroy_calls = [r for r in handler.requests_received if r["method"] == "destroySession"]
-        assert len(destroy_calls) == 1
-
-    def test_close_midscene_idempotent(self, stub_node_manager):
-        """多次 close_midscene 不应抛出异常。"""
-        _, handler = stub_node_manager
-
-        class MyDevice(MidsceneMixin):
-            def __init__(self):
-                self.init_midscene("emulator-5554")
-
-        device = MyDevice()
-        device._midscene_agent = MidsceneAgent("emulator-5554")
-
-        device.close_midscene()
-        device.close_midscene()
-
-    def test_ai_caches_agent_instance(self, stub_node_manager):
-        """多次访问 .ai 应返回同一个 agent 实例。"""
-        class MyDevice(MidsceneMixin):
-            def __init__(self):
-                self.init_midscene("emulator-5554")
-
-        device = MyDevice()
-        agent = MidsceneAgent("emulator-5554")
-        device._midscene_agent = agent
-
-        assert device.ai is agent
-        assert device.ai is agent
