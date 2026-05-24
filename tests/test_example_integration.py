@@ -8,7 +8,6 @@ import pytest
 
 from midscene_android import MidsceneAgent, MidsceneConfig
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # conftest.py 示例
 # ─────────────────────────────────────────────────────────────────────────────
@@ -40,8 +39,9 @@ def agent(midscene_config: MidsceneConfig):
 # 测试用例示例
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestLoginFlow:
 
+@pytest.mark.device
+class TestLoginFlow:
     def test_login_with_valid_credentials(self, agent: MidsceneAgent):
         """测试正常登录流程。"""
 

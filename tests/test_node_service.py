@@ -23,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from midscene_android import runtime
 from midscene_android.config import MidsceneConfig
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 
 def _make_dummy_config() -> MidsceneConfig:
     """Node 服务本身启动不需要真实 AI Key，用占位值即可。"""
@@ -46,6 +46,7 @@ def _reset_singleton():
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 
+
 class TestNodeBinary:
     """验证内置 Node 二进制可用，且不依赖系统 node。"""
 
@@ -58,6 +59,7 @@ class TestNodeBinary:
     def test_node_bin_is_bundled_not_system(self):
         """内置 Node 路径必须在本库 _runtime/bin/ 下，不能是系统 node。"""
         import shutil
+
         bundled = runtime.get_node_bin()
         system_node = shutil.which("node")
 
@@ -74,10 +76,13 @@ class TestNodeBinary:
 
     def test_node_bin_executable(self):
         import subprocess
+
         node = runtime.get_node_bin()
         result = subprocess.run(
             [str(node), "--version"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 0, f"node --version failed: {result.stderr}"
         version = result.stdout.strip()
@@ -86,8 +91,9 @@ class TestNodeBinary:
 
     def test_node_env_prepends_bundled_dir(self):
         """make_node_env 必须把内置 Node 目录放在 PATH 最前面。"""
-        from midscene_android.runtime import make_node_env
         import platform as _platform
+
+        from midscene_android.runtime import make_node_env
 
         node_bin = runtime.get_node_bin()
         env = make_node_env(node_bin)
@@ -107,6 +113,7 @@ class TestNpmInstall:
 
     def test_npm_cli_exists(self):
         from midscene_android.runtime import get_npm_cli
+
         path = get_npm_cli()
         assert path.exists(), f"npm-cli.js not found: {path}"
         print(f"\n  npm-cli.js: {path}")

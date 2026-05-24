@@ -28,7 +28,8 @@ class MidsceneConfig:
         self.model_family = self.model_family or os.environ.get("MIDSCENE_MODEL_FAMILY") or "openai"
 
         missing = [
-            env_var for value, env_var in (
+            env_var
+            for value, env_var in (
                 (self.base_url, "MIDSCENE_MODEL_BASE_URL"),
                 (self.api_key, "MIDSCENE_MODEL_API_KEY"),
                 (self.model_name, "MIDSCENE_MODEL_NAME"),
@@ -36,13 +37,13 @@ class MidsceneConfig:
             if not value
         ]
         if missing:
-            raise EnvironmentError(
+            raise OSError(
                 "Missing required environment variables for MidsceneConfig: "
                 + ", ".join(missing)
             )
 
     @classmethod
-    def from_env(cls) -> "MidsceneConfig":
+    def from_env(cls) -> MidsceneConfig:
         return cls()
 
     def to_node_env(self) -> dict[str, str]:

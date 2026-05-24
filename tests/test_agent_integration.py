@@ -48,6 +48,7 @@ _CACHE_METADATA_FILES = (
 
 # ─── 公共 Fixtures ────────────────────────────────────────────────────────────
 
+
 def _make_dummy_config() -> MidsceneConfig:
     """
     Node 服务启动本身不需要真实 AI Key。
@@ -91,7 +92,9 @@ def _require_connected_device_id(config: MidsceneConfig) -> str:
 
 def _extract_connected_devices(body: dict) -> list[dict]:
     if "error" in body:
-        raise RuntimeError(body["error"].get("message", "getConnectedDevices RPC failed"))
+        raise RuntimeError(
+            body["error"].get("message", "getConnectedDevices RPC failed")
+        )
     return body.get("result", {}).get("devices", [])
 
 
@@ -143,6 +146,7 @@ def node_service():
 
 # ─── Level 1：缓存与版本管理（真实缓存目录）──────────────────────────────────
 
+
 class TestVersionCache:
     """
     在真实 ~/.midscene_android/node_service 目录上验证缓存失效逻辑。
@@ -161,7 +165,10 @@ class TestVersionCache:
         runtime.ensure_node_service(runtime.get_node_bin())
         assert runtime.NPM_DONE_FLAG.exists(), "npm install should create done flag"
         assert runtime.VERSION_FILE.exists(), "npm install should write version file"
-        assert runtime.VERSION_FILE.read_text(encoding="utf-8").strip() == runtime.get_current_version()
+        assert (
+            runtime.VERSION_FILE.read_text(encoding="utf-8").strip()
+            == runtime.get_current_version()
+        )
         assert runtime.is_cache_stale() is False
 
     def test_cache_stale_when_install_flag_missing(self, node_cache_snapshot):
@@ -192,7 +199,9 @@ class TestVersionCache:
         runtime.invalidate_cache()
 
         for name in _CACHE_METADATA_FILES:
-            assert not (runtime.NODE_SVC_CACHE / name).exists(), f"{name} should be removed"
+            assert not (runtime.NODE_SVC_CACHE / name).exists(), (
+                f"{name} should be removed"
+            )
 
     def test_invalidate_cache_preserves_node_modules(self, node_cache_snapshot):
         """invalidate_cache 必须保留 node_modules/，以便快速重装。"""
@@ -206,6 +215,7 @@ class TestVersionCache:
 
 
 # ─── Level 2：Node 服务 + Agent 初始化（无 Android 设备）────────────────────
+
 
 class TestNodeServiceManagerLifecycle:
     """
@@ -307,7 +317,12 @@ class TestNodeServiceRPC:
         """ping 是最基本的健康检查，不需要设备或 AI Key。"""
         resp = requests.post(
             f"http://127.0.0.1:{node_service.port}/rpc",
-            json={"jsonrpc": "2.0", "id": str(uuid.uuid4()), "method": "ping", "params": {}},
+            json={
+                "jsonrpc": "2.0",
+                "id": str(uuid.uuid4()),
+                "method": "ping",
+                "params": {},
+            },
             timeout=10,
         )
         data = resp.json()
@@ -380,11 +395,12 @@ class TestNodeServiceRPC:
 
         assert not errors, f"Concurrent pings raised: {errors}"
         assert all(results), "All concurrent pings should succeed"
-        print(f"\n  10 concurrent pings: all OK")
+        print("\n  10 concurrent pings: all OK")
 
 
 class TestMidsceneAgentInit:
     """Level 2：MidsceneAgent 仅需 device_id，配置来自环境变量。"""
+
     """
     验证 MidsceneAgent 的初始化路径与 Node 服务的交互。
 
@@ -429,6 +445,7 @@ class TestMidsceneAgentInit:
 
 
 # ─── Level 3：完整 AI 操作（需要真实 Android 设备 + AI Key）────────────────
+
 
 @pytest.fixture(scope="module")
 def real_agent():

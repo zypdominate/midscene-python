@@ -71,6 +71,7 @@ ALL_PLATFORMS = list(PLATFORM_MAP.keys())
 
 # ─── 工具函数 ───
 
+
 def _run(cmd: list[str], cwd: Path = REPO_ROOT) -> None:
     """运行命令，失败时抛出 RuntimeError。"""
     print(f"  $ {' '.join(cmd)}")
@@ -151,11 +152,13 @@ def build_sdist() -> Path:
     构建工具：python setup.py sdist --formats=tar
     """
     print(f"\n{'=' * 60}")
-    print(f"  Building sdist (.tar)")
+    print("  Building sdist (.tar)")
     print(f"{'=' * 60}")
 
     DIST_DIR.mkdir(exist_ok=True)
-    _run([sys.executable, "setup.py", "sdist", "--formats=tar", f"--dist-dir={DIST_DIR}"])
+    _run(
+        [sys.executable, "setup.py", "sdist", "--formats=tar", f"--dist-dir={DIST_DIR}"]
+    )
 
     tarballs = sorted(
         DIST_DIR.glob("*.tar"),
@@ -195,12 +198,15 @@ def build_wheel(platform_key: str) -> Path:
     backed_up = _hide_other_binaries(platform_key)
     try:
         DIST_DIR.mkdir(exist_ok=True)
-        _run([
-            sys.executable, "setup.py",
-            "bdist_wheel",
-            f"--plat-name={wheel_plat}",
-            f"--dist-dir={DIST_DIR}",
-        ])
+        _run(
+            [
+                sys.executable,
+                "setup.py",
+                "bdist_wheel",
+                f"--plat-name={wheel_plat}",
+                f"--dist-dir={DIST_DIR}",
+            ]
+        )
     finally:
         _restore_binaries(backed_up)
 
@@ -211,7 +217,9 @@ def build_wheel(platform_key: str) -> Path:
         reverse=True,
     )
     if not wheels:
-        raise FileNotFoundError(f"No wheel found in {DIST_DIR} for platform {wheel_plat}")
+        raise FileNotFoundError(
+            f"No wheel found in {DIST_DIR} for platform {wheel_plat}"
+        )
 
     wheel_path = wheels[0]
     size_mb = wheel_path.stat().st_size / 1024 / 1024
@@ -220,6 +228,7 @@ def build_wheel(platform_key: str) -> Path:
 
 
 # ─── CLI ───
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -295,7 +304,11 @@ def main() -> None:
     print(f"{'=' * 60}")
     for artifact in built:
         size = artifact.stat().st_size
-        label = f"{size / 1024 / 1024:.1f} MB" if size > 1024 * 1024 else f"{size / 1024:.0f} KB"
+        label = (
+            f"{size / 1024 / 1024:.1f} MB"
+            if size > 1024 * 1024
+            else f"{size / 1024:.0f} KB"
+        )
         print(f"  ✓ {artifact.name:<60} {label}")
     for name in failed:
         print(f"  ✗ {name}  (failed)")
