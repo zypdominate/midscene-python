@@ -33,13 +33,13 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
-NODE_BIN_DIR = REPO_ROOT / "midscene_android" / "_runtime" / "bin"
+NODE_BIN_DIR = REPO_ROOT / "midscene_android" / "_node_driver" / "bin"
 DIST_DIR = REPO_ROOT / "dist"
 
 # ─── 平台配置 ───
 #
 # key          : fetch_node_binaries.py 中的 --platform 参数
-# node_file    : 放置在 _runtime/bin/ 下的文件名
+# node_file    : 放置在 _node_driver/bin/ 下的文件名
 # wheel_plat   : bdist_wheel --plat-name 接受的平台 tag
 #
 PLATFORM_MAP: dict[str, dict[str, str]] = {

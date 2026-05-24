@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-开发者工具：下载各平台 Node.js 二进制 + 完整 npm 包，放置到 _runtime/ 目录。
+开发者工具：下载各平台 Node.js 二进制 + 完整 npm 包，放置到 _node_driver/ 目录。
 
 在发布新版本前运行：
     python scripts/fetch_node_binaries.py
@@ -26,8 +26,8 @@ import requests
 # 目标目录
 SCRIPT_DIR = Path(__file__).parent
 PACKAGE_DIR = SCRIPT_DIR.parent / "midscene_android"
-NODE_BIN_DIR = PACKAGE_DIR / "_runtime" / "bin"
-NPM_DIR = PACKAGE_DIR / "_runtime" / "npm"
+NODE_BIN_DIR = PACKAGE_DIR / "_node_driver" / "bin"
+NPM_DIR = PACKAGE_DIR / "_node_driver" / "npm"
 
 # Node.js 默认版本（LTS）
 DEFAULT_NODE_VERSION = "22.12.0"
@@ -67,7 +67,7 @@ PLATFORMS = {
     },
 }
 
-# npm 完整包（从 registry 下载 tgz，解压整个 package/ 到 _runtime/npm/）
+# npm 完整包（从 registry 下载 tgz，解压整个 package/ 到 _node_driver/npm/）
 NPM_TGZ_URL = "https://registry.npmjs.org/npm/-/npm-{version}.tgz"
 
 
@@ -130,14 +130,14 @@ def fetch_node_binary(platform_key: str, version: str) -> None:
 
 def fetch_npm(version: str = DEFAULT_NPM_VERSION) -> None:
     """
-    下载完整 npm 包，解压到 _runtime/npm/。
+    下载完整 npm 包，解压到 _node_driver/npm/。
 
     npm tgz 内部结构为 package/...，解压后目录结构：
-      _runtime/npm/bin/npm-cli.js   ← 入口
-      _runtime/npm/lib/...
-      _runtime/npm/node_modules/...
+      _node_driver/npm/bin/npm-cli.js   ← 入口
+      _node_driver/npm/lib/...
+      _node_driver/npm/node_modules/...
 
-    调用方式：<node_bin> _runtime/npm/bin/npm-cli.js install
+    调用方式：<node_bin> _node_driver/npm/bin/npm-cli.js install
     """
     npm_cli_entry = NPM_DIR / "bin" / "npm-cli.js"
     if npm_cli_entry.exists():
