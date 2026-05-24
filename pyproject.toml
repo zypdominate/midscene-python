@@ -31,16 +31,30 @@ dev = [
     "build",
     "twine",
     "requests",
+    "ruff",
 ]
-
-[project.scripts]
-# 预留 CLI 入口，方便未来扩展（如手动触发 npm install）
-midscene-android = "midscene_android.cli:main"
 
 [tool.pytest.ini_options]
 markers = [
     "device: tests that require a real Android device connected via ADB and a valid AI Key",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["midscene_android"]
 
 [tool.setuptools.packages.find]
 where = ["."]

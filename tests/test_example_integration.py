@@ -4,14 +4,14 @@
 直接创建 MidsceneAgent，与现有设备封装并行使用。
 """
 
+import pytest
+
 from midscene_android import MidsceneAgent, MidsceneConfig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # conftest.py 示例
 # ─────────────────────────────────────────────────────────────────────────────
-
-import pytest
 
 
 @pytest.fixture(scope="session")
