@@ -57,13 +57,37 @@ function getSession(sessionId) {
     return session;
 }
 
+function parseAdbDevices(stdout) {
+    return stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('List of devices') && !line.startsWith('*'))
+        .map((line) => {
+            const [udid, state] = line.split(/\s+/);
+            return {udid, state};
+        })
+        .filter((device) => device.udid && device.state);
+}
+
 async function listConnectedDevices() {
     try {
+        // Method 1: Try manual adb call (most compatible with PATH-only setups)
+        const stdout = await runCommand('adb', ['devices'], {timeout: 10000});
+        const devices = parseAdbDevices(stdout);
+        if (devices.length > 0) {
+            return devices;
+        }
+    } catch (e) {
+        log(`Manual adb devices failed: ${e.message}`);
+    }
+
+    try {
+        // Method 2: Fallback to @midscene/android's internal discovery
         const devices = await getConnectedDevices();
         return devices.map(udid => ({udid, state: 'device'}));
     } catch (error) {
-        log(`Failed to list devices: ${error.message}`);
-        throw new Error(`Failed to list devices: ${error.message}`);
+        log(`Internal getConnectedDevices failed: ${error.message}`);
+        throw new Error(`Unable to list Android devices. Please ensure 'adb' is in your PATH or ANDROID_HOME is set. Error: ${error.message}`);
     }
 }
 
@@ -77,11 +101,11 @@ const handlers = {
     async createSession({deviceId, aiActionContext}) {
         let targetDeviceId = deviceId;
         if (!targetDeviceId) {
-            const devices = await getConnectedDevices();
+            const devices = await listConnectedDevices();
             if (devices.length === 0) {
                 throw new Error("No connected Android devices found via ADB");
             }
-            targetDeviceId = devices[0];
+            targetDeviceId = devices[0].udid;
         }
 
         log(`Creating session for device: ${targetDeviceId}`);
@@ -397,6 +421,8 @@ server.listen(PORT, '127.0.0.1', () => {
     const addr = server.address();
     const message = `MIDSCENE_SERVICE_READY:${addr.port}`;
     log(`Service started on port ${addr.port} (PID: ${process.pid})`);
+    log(`Environment: PATH=${process.env.PATH}`);
+    log(`Environment: ANDROID_HOME=${process.env.ANDROID_HOME}`);
     process.stdout.write(`${message}\n`);
 });
 
