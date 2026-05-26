@@ -9,10 +9,26 @@
 
 const {execFile} = require('child_process');
 const http = require('http');
-const {AndroidAgent, AndroidDevice} = require('@midscene/android');
+const fs = require('fs');
+const path = require('path');
+const {
+    AndroidAgent,
+    AndroidDevice,
+    getConnectedDevices
+} = require('@midscene/android');
 
 const sessions = new Map();
 let sessionCounter = 0;
+
+// ====================== Logging ======================
+const LOG_FILE = path.join(process.cwd(), "midscene_service.log");
+
+function log(message) {
+    const timestamp = new Date().toLocaleTimeString("en-US", { hour12: false });
+    const line = `[${timestamp}] ${message}\n`;
+    fs.appendFileSync(LOG_FILE, line, "utf-8");
+    console.log(line.trim());
+}
 
 function nextSessionId() {
     sessionCounter += 1;
@@ -41,24 +57,13 @@ function getSession(sessionId) {
     return session;
 }
 
-function parseAdbDevices(stdout) {
-    return stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith('List of devices') && !line.startsWith('*'))
-        .map((line) => {
-            const [udid, state] = line.split(/\s+/);
-            return {udid, state};
-        })
-        .filter((device) => device.udid && device.state);
-}
-
 async function listConnectedDevices() {
     try {
-        const stdout = await runCommand('adb', ['devices'], {timeout: 60000});
-        return parseAdbDevices(stdout);
+        const devices = await getConnectedDevices();
+        return devices.map(udid => ({udid, state: 'device'}));
     } catch (error) {
-        throw new Error(`Failed to run adb devices: ${error.message}`);
+        log(`Failed to list devices: ${error.message}`);
+        throw new Error(`Failed to list devices: ${error.message}`);
     }
 }
 
@@ -67,15 +72,30 @@ async function listConnectedDevices() {
 const handlers = {
     /**
      * 创建设备会话，对应 JS 侧 new AndroidDevice() + new AndroidAgent()
-     * params: { deviceId }
+     * params: { deviceId, aiActionContext }
      */
-    async createSession({deviceId}) {
-        const device = new AndroidDevice(deviceId);
+    async createSession({deviceId, aiActionContext}) {
+        let targetDeviceId = deviceId;
+        if (!targetDeviceId) {
+            const devices = await getConnectedDevices();
+            if (devices.length === 0) {
+                throw new Error("No connected Android devices found via ADB");
+            }
+            targetDeviceId = devices[0];
+        }
+
+        log(`Creating session for device: ${targetDeviceId}`);
+        const device = new AndroidDevice(targetDeviceId);
         await device.connect();
-        const agent = new AndroidAgent(device);
+        
+        const agentOptions = aiActionContext ? { aiActionContext } : {};
+        const agent = new AndroidAgent(device, agentOptions);
+        
         const sessionId = nextSessionId();
-        sessions.set(sessionId, {device, agent});
-        return {sessionId};
+        sessions.set(sessionId, {device, agent, deviceId: targetDeviceId});
+        
+        log(`Session created: ${sessionId} (device: ${targetDeviceId})`);
+        return {sessionId, deviceId: targetDeviceId};
     },
 
     /**
@@ -86,13 +106,16 @@ const handlers = {
         if (!session) {
             return {ok: true};
         }
+        log(`Destroying session: ${sessionId}`);
         try {
             await session.agent.destroy?.();
-        } catch (_) {
+        } catch (e) {
+            log(`Error destroying agent: ${e.message}`);
         }
         try {
             await session.device.disconnect?.();
-        } catch (_) {
+        } catch (e) {
+            log(`Error disconnecting device: ${e.message}`);
         }
         sessions.delete(sessionId);
         return {ok: true};
@@ -229,6 +252,65 @@ const handlers = {
         return {ok: true};
     },
 
+    // ── Device & System Actions ──────────────────────────────────────────────────
+
+    async back({sessionId}) {
+        await getSession(sessionId).device.back();
+        return {ok: true};
+    },
+
+    async home({sessionId}) {
+        await getSession(sessionId).device.home();
+        return {ok: true};
+    },
+
+    async recentApps({sessionId}) {
+        await getSession(sessionId).device.recentApps();
+        return {ok: true};
+    },
+
+    async launchApp({sessionId, packageName}) {
+        await getSession(sessionId).device.launchApp(packageName);
+        return {ok: true};
+    },
+
+    async terminateApp({sessionId, packageName}) {
+        await getSession(sessionId).device.terminateApp(packageName);
+        return {ok: true};
+    },
+
+    async getScreenshot({sessionId}) {
+        const base64 = await getSession(sessionId).device.screenshot();
+        return {screenshot: base64};
+    },
+
+    // ── Advanced Automation ──────────────────────────────────────────────────────
+
+    async setAIActContext({sessionId, aiActionContext}) {
+        getSession(sessionId).agent.setAIActContext(aiActionContext);
+        return {ok: true};
+    },
+
+    async runYaml({sessionId, yamlContent}) {
+        const result = await getSession(sessionId).agent.runYaml(yamlContent);
+        return {result};
+    },
+
+    async getReportFile({sessionId}) {
+        // midscene-android agent usually has a report file path if it's generated
+        const reportPath = getSession(sessionId).agent.reportFile;
+        return {reportPath: reportPath || null};
+    },
+
+    async getStatus({sessionId}) {
+        const session = getSession(sessionId);
+        return {
+            status: "connected",
+            deviceId: session.deviceId,
+            sessionId: sessionId
+        };
+    },
+
     async runAdbShell({sessionId, command, timeoutMs}) {
         const output = await getSession(sessionId).agent.runAdbShell(
             command,
@@ -242,7 +324,12 @@ const handlers = {
     },
 
     ping() {
-        return {pong: true, pid: process.pid};
+        return {
+            pong: true,
+            pid: process.pid,
+            version: "0.1.0",
+            activeSessions: sessions.size
+        };
     },
 };
 
@@ -308,7 +395,9 @@ const PORT = parseInt(process.env.PORT || '0', 10);
 
 server.listen(PORT, '127.0.0.1', () => {
     const addr = server.address();
-    process.stdout.write(`MIDSCENE_SERVICE_READY:${addr.port}\n`);
+    const message = `MIDSCENE_SERVICE_READY:${addr.port}`;
+    log(`Service started on port ${addr.port} (PID: ${process.pid})`);
+    process.stdout.write(`${message}\n`);
 });
 
 async function gracefulShutdown() {
