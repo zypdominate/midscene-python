@@ -17,6 +17,7 @@ class MidsceneConfig:
     api_key: Optional[str] = None
     model_name: Optional[str] = None
     model_family: Optional[str] = None
+    ai_action_context: Optional[str] = None
 
     def __post_init__(self) -> None:
         load_dotenv()
@@ -24,6 +25,7 @@ class MidsceneConfig:
         self.api_key = self.api_key or os.environ.get("MIDSCENE_MODEL_API_KEY")
         self.model_name = self.model_name or os.environ.get("MIDSCENE_MODEL_NAME")
         self.model_family = self.model_family or os.environ.get("MIDSCENE_MODEL_FAMILY") or "openai"
+        self.ai_action_context = self.ai_action_context or os.environ.get("MIDSCENE_AI_ACTION_CONTEXT")
 
         missing = [
             env_var
@@ -45,9 +47,12 @@ class MidsceneConfig:
         return cls()
 
     def to_node_env(self) -> dict[str, str]:
-        return {
+        env = {
             "MIDSCENE_MODEL_BASE_URL": self.base_url,
             "MIDSCENE_MODEL_API_KEY": self.api_key,
             "MIDSCENE_MODEL_NAME": self.model_name,
             "MIDSCENE_MODEL_FAMILY": self.model_family,
         }
+        if self.ai_action_context:
+            env["MIDSCENE_AI_ACTION_CONTEXT"] = self.ai_action_context
+        return env

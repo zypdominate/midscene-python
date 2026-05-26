@@ -15,7 +15,7 @@ _TIMEOUT = 120
 class MidsceneAgent:
     def __init__(
             self,
-            device_id: str,
+            device_id: Optional[str] = None,
             config: Optional[MidsceneConfig] = None,
     ):
         self._device_id = device_id
@@ -25,7 +25,17 @@ class MidsceneAgent:
         self._node_manager = NodeServiceManager(self._config)
         self._node_manager.ensure_started()
         self._port = self._node_manager.port
-        self._session_id = self._rpc("createSession", deviceId=device_id)["sessionId"]
+        
+        # Call createSession with deviceId and optional aiActionContext
+        create_params = {}
+        if device_id:
+            create_params["deviceId"] = device_id
+        if self._config.ai_action_context:
+            create_params["aiActionContext"] = self._config.ai_action_context
+            
+        result = self._rpc("createSession", **create_params)
+        self._session_id = result["sessionId"]
+        self._device_id = result.get("deviceId") or device_id
 
     def _rpc(self, method: str, timeout: int = _TIMEOUT, **params: Any) -> dict[str, Any]:
         if self._session_id is not None and method != "createSession":
@@ -143,6 +153,50 @@ class MidsceneAgent:
             assertion=assertion,
             timeoutMs=timeout_ms,
         )
+
+    # ── Device & System Actions ──────────────────────────────────────────────────
+
+    def back(self) -> None:
+        """Press the back button."""
+        self._rpc("back")
+
+    def home(self) -> None:
+        """Press the home button."""
+        self._rpc("home")
+
+    def recent_apps(self) -> None:
+        """Open the recent apps screen."""
+        self._rpc("recentApps")
+
+    def launch_app(self, package_name: str) -> None:
+        """Launch an app by its package name."""
+        self._rpc("launchApp", packageName=package_name)
+
+    def terminate_app(self, package_name: str) -> None:
+        """Terminate an app by its package name."""
+        self._rpc("terminateApp", packageName=package_name)
+
+    def get_screenshot(self) -> str:
+        """Get a base64 encoded screenshot of the device."""
+        return self._rpc("getScreenshot").get("screenshot", "")
+
+    # ── Advanced Automation ──────────────────────────────────────────────────────
+
+    def set_ai_act_context(self, ai_action_context: str) -> None:
+        """Set the context for subsequent AI actions."""
+        self._rpc("setAIActContext", aiActionContext=ai_action_context)
+
+    def run_yaml(self, yaml_content: str) -> Any:
+        """Run a Midscene YAML script."""
+        return self._rpc("runYaml", yamlContent=yaml_content).get("result")
+
+    def get_report_file(self) -> Optional[str]:
+        """Get the path to the current agent's report file, if any."""
+        return self._rpc("getReportFile").get("reportPath")
+
+    def get_status(self) -> dict[str, Any]:
+        """Get the current status of the agent session."""
+        return self._rpc("getStatus")
 
     def run_adb_shell(self, command: str, timeout: Optional[int] = None) -> str:
         rpc_timeout = max(_TIMEOUT, timeout // 1000 + 10) if timeout else _TIMEOUT

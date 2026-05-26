@@ -73,6 +73,24 @@ class NodeServiceManager:
                 return
             self._start()
 
+    def get_connected_devices(self) -> list[dict[str, str]]:
+        """获取当前已连接的 Android 设备列表。"""
+        self.ensure_started()
+        import requests
+        import uuid
+        resp = requests.post(
+            f"http://127.0.0.1:{self.port}/rpc",
+            json={
+                "jsonrpc": "2.0",
+                "id": str(uuid.uuid4()),
+                "method": "getConnectedDevices",
+                "params": {},
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json().get("result", {}).get("devices", [])
+
     # ── 内部实现 ────────────────────────────────────────────────────────────────
 
     def _is_running(self) -> bool:
