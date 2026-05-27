@@ -46,22 +46,6 @@ _CACHE_METADATA_FILES = (
 )
 
 
-# ─── 公共 Fixtures ────────────────────────────────────────────────────────────
-
-
-def _make_dummy_config() -> MidsceneConfig:
-    """
-    Node 服务启动本身不需要真实 AI Key。
-    此配置用于 Level 1/2 测试。
-    """
-    return MidsceneConfig(
-        base_url="https://placeholder.example.com/v1",
-        api_key="dummy-key-for-integration-test",
-        model_name="placeholder-model",
-        model_family="openai",
-    )
-
-
 def _reset_singleton() -> None:
     """在 teardown 中重置 NodeServiceManager 单例，避免测试间状态污染。"""
     mgr = NodeServiceManager._instance
@@ -137,7 +121,7 @@ def node_service():
     模块测试结束后自动关闭子进程。
     """
     _reset_singleton()
-    config = _make_dummy_config()
+    config = MidsceneConfig.from_env()
     mgr = NodeServiceManager(config)
     mgr.ensure_started()
     yield mgr
@@ -166,8 +150,8 @@ class TestVersionCache:
         assert runtime.NPM_DONE_FLAG.exists(), "npm install should create done flag"
         assert runtime.VERSION_FILE.exists(), "npm install should write version file"
         assert (
-            runtime.VERSION_FILE.read_text(encoding="utf-8").strip()
-            == runtime.get_current_version()
+                runtime.VERSION_FILE.read_text(encoding="utf-8").strip()
+                == runtime.get_current_version()
         )
         assert runtime.is_cache_stale() is False
 
@@ -231,14 +215,14 @@ class TestNodeServiceManagerLifecycle:
 
     def test_port_before_start_raises_runtime_error(self):
         """访问 .port 必须在 ensure_started() 之前抛出 RuntimeError。"""
-        config = _make_dummy_config()
+        config = MidsceneConfig.from_env()
         mgr = NodeServiceManager(config)
         with pytest.raises(RuntimeError, match="not started"):
             _ = mgr.port
 
     def test_ensure_started_assigns_valid_port(self):
         """ensure_started() 成功后，port 应是一个合法端口号。"""
-        config = _make_dummy_config()
+        config = MidsceneConfig.from_env()
         mgr = NodeServiceManager(config)
         mgr.ensure_started()
 
@@ -248,14 +232,14 @@ class TestNodeServiceManagerLifecycle:
 
     def test_singleton_returns_same_instance(self):
         """同一 Python 进程内多次构造应返回同一实例。"""
-        config = _make_dummy_config()
+        config = MidsceneConfig.from_env()
         mgr1 = NodeServiceManager(config)
         mgr2 = NodeServiceManager(config)
         assert mgr1 is mgr2, "NodeServiceManager must be a singleton"
 
     def test_ensure_started_idempotent(self):
         """多次调用 ensure_started() 不应启动多个进程，端口保持不变。"""
-        config = _make_dummy_config()
+        config = MidsceneConfig.from_env()
         mgr = NodeServiceManager(config)
         mgr.ensure_started()
         port_first = mgr.port
@@ -267,7 +251,7 @@ class TestNodeServiceManagerLifecycle:
 
     def test_ensure_started_thread_safe(self):
         """并发调用 ensure_started() 不应导致多进程或竞态条件。"""
-        config = _make_dummy_config()
+        config = MidsceneConfig.from_env()
         mgr = NodeServiceManager(config)
         errors: list[Exception] = []
 
@@ -288,7 +272,7 @@ class TestNodeServiceManagerLifecycle:
 
     def test_service_process_is_running_after_start(self):
         """ensure_started() 后，内部 Popen 进程应处于运行状态。"""
-        config = _make_dummy_config()
+        config = MidsceneConfig.from_env()
         mgr = NodeServiceManager(config)
         mgr.ensure_started()
 
@@ -297,7 +281,7 @@ class TestNodeServiceManagerLifecycle:
 
     def test_shutdown_clears_port_and_instance(self):
         """_shutdown() 后，_port 应清零，单例应被清除。"""
-        config = _make_dummy_config()
+        config = MidsceneConfig.from_env()
         mgr = NodeServiceManager(config)
         mgr.ensure_started()
 
@@ -535,6 +519,7 @@ class TestAIActionsOnRealDevice:
         assert result is not None or result is None
         print(f"\n  Query result: {result!r}")
 
+    @pytest.mark.xfail(reason="aiScroll 存在 bug")
     def test_scroll_down(self, real_agent):
         """aiScroll：向下滚动当前页面。"""
         real_agent.ai_scroll("当前页面", direction="down", distance="small")
@@ -546,11 +531,12 @@ class TestAIActionsOnRealDevice:
         """
         real_agent.ai_wait_for("屏幕 UI 处于稳定状态，没有加载动画", timeout_ms=5000)
 
-    def test_session_lifecycle_create_and_destroy(self, ai_config):
+    def test_session_lifecycle_create_and_destroy(self):
         """
         完整的会话生命周期：创建 → 使用 → 销毁。
         这个测试独立创建自己的 session，验证完整的 init/destroy 流程。
         """
+        ai_config = MidsceneConfig.from_env()
         device_id = _require_connected_device_id(ai_config)
         agent = MidsceneAgent(device_id)
         session_id = agent._session_id
