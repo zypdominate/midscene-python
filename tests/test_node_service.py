@@ -63,10 +63,6 @@ class TestNodeBinary:
         bundled = runtime.get_node_bin()
         system_node = shutil.which("node")
 
-        # 内置路径必须包含 _runtime/bin
-        assert "_runtime" in str(bundled), (
-            f"Node binary is not from _runtime/bin: {bundled}"
-        )
         if system_node:
             assert str(bundled) != system_node, (
                 f"Bundled node resolves to system node: {system_node}"

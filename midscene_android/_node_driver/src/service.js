@@ -169,10 +169,10 @@ const handlers = {
 
     /**
      * agent.aiInput() - 输入文本
-     * params: { sessionId, locate, text }
+     * params: { sessionId, locate, value }
      */
     async aiInput({sessionId, locate, value}) {
-        await getSession(sessionId).agent.aiInput(locate, value);
+        await getSession(sessionId).agent.aiInput(locate, {value});
         return {ok: true};
     },
 
