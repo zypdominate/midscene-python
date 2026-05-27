@@ -6,29 +6,17 @@
 
 import pytest
 
-from midscene_android import MidsceneAgent, MidsceneConfig
+from midscene_android import MidsceneAgent
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # conftest.py 示例
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.fixture(scope="session")
-def midscene_config() -> MidsceneConfig:
-    """session 级别的 AI 配置（整个测试会话共享一个 Node 进程）。"""
-    # AI 模型配置（实际项目中从环境变量或配置文件读取）
-    MIDSCENE_CONFIG = MidsceneConfig(
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        api_key="sk-your-api-key-here",
-        model_name="qwen-vl-max",
-        model_family="qwen",
-    )
-    return MIDSCENE_CONFIG
-
-
 @pytest.fixture
-def agent(midscene_config: MidsceneConfig):
-    session = MidsceneAgent("emulator-5554", midscene_config)
+def agent():
+    session = MidsceneAgent()
     try:
         yield session
     finally:
@@ -46,7 +34,7 @@ class TestLoginFlow:
         """测试正常登录流程。"""
 
         # Auto Planning：描述目标，AI 自动规划步骤
-        agent.run_adb_shell("am start -n com.example.myapp/.MainActivity")
+        agent.run_adb_shell("am start -n com.android.settings/.Settings")
         agent.ai_action("等待启动页动画结束，进入 App 首页")
 
         # Instant Actions：精确描述单个动作，更快更稳定
@@ -63,7 +51,7 @@ class TestLoginFlow:
 
     def test_extract_user_info(self, agent: MidsceneAgent):
         """测试数据提取。"""
-        agent.run_adb_shell("am start -n com.example.myapp/.MainActivity")
+        agent.run_adb_shell("am start -n com.android.settings/.Settings")
         agent.ai_action("进入用户个人资料页面")
 
         # 结构化数据提取
