@@ -106,6 +106,8 @@ const handlers = {
                 throw new Error("No connected Android devices found via ADB");
             }
             targetDeviceId = devices[0].udid;
+            log(`Using targetDeviceId: ${targetDeviceId}`);
+            log(`Using devices: ${devices}`);
         }
 
         log(`Creating session for device: ${targetDeviceId}`);
@@ -294,17 +296,17 @@ const handlers = {
     },
 
     async launchApp({sessionId, packageName}) {
-        await getSession(sessionId).device.launchApp(packageName);
+        await getSession(sessionId).device.launch(packageName);
         return {ok: true};
     },
 
     async terminateApp({sessionId, packageName}) {
-        await getSession(sessionId).device.terminateApp(packageName);
+        await getSession(sessionId).device.terminate(packageName);
         return {ok: true};
     },
 
     async getScreenshot({sessionId}) {
-        const base64 = await getSession(sessionId).device.screenshot();
+        const base64 = await getSession(sessionId).device.screenshotBase64();
         return {screenshot: base64};
     },
 

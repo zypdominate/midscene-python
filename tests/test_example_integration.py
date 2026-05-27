@@ -29,40 +29,63 @@ def agent():
 
 
 @pytest.mark.device
-class TestLoginFlow:
-    def test_login_with_valid_credentials(self, agent: MidsceneAgent):
-        """测试正常登录流程。"""
+class TestBasicAndroidActions:
+    """
+    通用 Android 操作测试。
+    这些用例旨在任何 Android 设备上都能运行，不依赖特定 App。
+    """
 
-        # Auto Planning：描述目标，AI 自动规划步骤
-        agent.run_adb_shell("am start -n com.android.settings/.Settings")
-        agent.ai_action("等待启动页动画结束，进入 App 首页")
+    def test_system_navigation(self, agent: MidsceneAgent):
+        """测试基础系统导航操作。"""
+        # 返回主页
+        agent.home()
+        agent.ai_assert("我正处于手机主屏幕或桌面")
 
-        # Instant Actions：精确描述单个动作，更快更稳定
-        agent.ai_tap("登录 / 注册 按钮")
-        agent.ai_input("手机号输入框", "13800138000")
-        agent.ai_input("密码输入框", "Test@123456")
-        agent.ai_tap("登录按钮")
+        # 打开最近应用界面
+        agent.recent_apps()
+        agent.ai_assert("我看到了最近运行的应用列表")
 
-        # 等待异步操作
-        agent.ai_wait_for("登录成功，显示用户首页", timeout_ms=10000)
+        # 返回桌面
+        agent.home()
 
-        # AI 断言
-        agent.ai_assert("当前页面是用户首页，顶部显示欢迎信息")
+    def test_settings_interaction(self, agent: MidsceneAgent):
+        """测试系统设置页面的基本操作。"""
+        # 通过 ADB 启动设置应用 (所有 Android 通用)
+        agent.run_adb_shell("am start -a android.settings.SETTINGS")
 
-    def test_extract_user_info(self, agent: MidsceneAgent):
-        """测试数据提取。"""
-        agent.run_adb_shell("am start -n com.android.settings/.Settings")
-        agent.ai_action("进入用户个人资料页面")
+        # 使用 AI 定位并点击设置项
+        agent.ai_tap("显示 或 屏幕设置")
 
-        # 结构化数据提取
-        user_info = agent.ai_query(
-            '{"username": string, "level": number, "avatar_visible": boolean}'
+        # 向上滚动以查找更多内容
+        agent.ai_scroll(direction="down")
+
+        # 返回上一级
+        agent.back()
+        agent.ai_assert("回到了设置主页面")
+
+    def test_extract_system_info(self, agent: MidsceneAgent):
+        """测试从设置界面提取结构化数据。"""
+        # 确保在设置主页
+        agent.run_adb_shell("am start -a android.settings.SETTINGS")
+
+        # 提取页面上的设置分类名称
+        # 这里演示了如何获取列表中的多个项
+        items = agent.ai_query(
+            'string[] // 页面上可见的所有设置选项标题'
         )
-        assert user_info["username"] != ""
-        assert user_info["level"] >= 1
-        assert user_info["avatar_visible"] is True
+        assert isinstance(items, list)
+        assert len(items) > 0
+        print(f"\n  Detected settings: {items}")
 
-    def test_agent_can_be_used_with_existing_device_wrapper(self, agent: MidsceneAgent):
-        """现有设备封装继续负责原生操作，MidsceneAgent 只负责 AI 层。"""
-        agent.ai_tap("接受条款按钮")
-        agent.ai_assert("输入框中显示 Hello World")
+    def test_screenshot_and_status(self, agent: MidsceneAgent):
+        """测试截图获取和状态检查。"""
+        # 获取 Base64 截图
+        base64_data = agent.get_screenshot()
+        assert base64_data.startswith("data:image/png;base64,iVBORw")  # PNG 文件的 Base64 开头
+        print(f"\n  Screenshot received, length: {len(base64_data)}")
+
+        # 获取当前会话状态
+        status = agent.get_status()
+        assert status["status"] == "connected"
+        assert "sessionId" in status
+        print(f"  Session status: {status}")
