@@ -57,6 +57,19 @@ function getSession(sessionId) {
     return session;
 }
 
+/**
+ * 过滤对象中的 null 和 undefined 值，防止传给 Agent 时触发参数校验错误
+ */
+function cleanOptions(options) {
+    const cleaned = {};
+    for (const key in options) {
+        if (options[key] !== null && options[key] !== undefined) {
+            cleaned[key] = options[key];
+        }
+    }
+    return cleaned;
+}
+
 function parseAdbDevices(stdout) {
     return stdout
         .split(/\r?\n/)
@@ -191,20 +204,14 @@ const handlers = {
      * agent.aiScroll() - 滚动
      *     * params: { sessionId, locate, direction, scrollType?, distance? }
      */
-    async aiScroll({sessionId, locate, direction, scrollType, distance}) {
-        const options = {};
-        if (direction !== undefined) options.direction = direction;
-        if (scrollType !== undefined) options.scrollType = scrollType;
-        if (distance !== undefined) options.distance = distance;
+    async aiScroll({sessionId, locate, ...rest}) {
+        const options = cleanOptions(rest);
         await getSession(sessionId).agent.aiScroll(locate, options);
         return {ok: true};
     },
 
-    async aiPinch({sessionId, locate, direction, distance, duration}) {
-        const options = {};
-        if (direction !== undefined) options.direction = direction;
-        if (distance !== undefined) options.distance = distance;
-        if (duration !== undefined) options.duration = duration;
+    async aiPinch({sessionId, locate, ...rest}) {
+        const options = cleanOptions(rest);
         await getSession(sessionId).agent.aiPinch(locate, options);
         return {ok: true};
     },
