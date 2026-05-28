@@ -24,7 +24,7 @@ let sessionCounter = 0;
 const LOG_FILE = path.join(process.cwd(), "midscene_service.log");
 
 function log(message) {
-    const timestamp = new Date().toLocaleTimeString("en-US", { hour12: false });
+    const timestamp = new Date().toLocaleTimeString("en-US", {hour12: false});
     const line = `[${timestamp}] ${message}\n`;
     fs.appendFileSync(LOG_FILE, line, "utf-8");
     console.log(line.trim());
@@ -126,13 +126,13 @@ const handlers = {
         log(`Creating session for device: ${targetDeviceId}`);
         const device = new AndroidDevice(targetDeviceId);
         await device.connect();
-        
-        const agentOptions = aiActionContext ? { aiActionContext } : {};
+
+        const agentOptions = aiActionContext ? {aiActionContext} : {};
         const agent = new AndroidAgent(device, agentOptions);
-        
+
         const sessionId = nextSessionId();
         sessions.set(sessionId, {device, agent, deviceId: targetDeviceId});
-        
+
         log(`Session created: ${sessionId} (device: ${targetDeviceId})`);
         return {sessionId, deviceId: targetDeviceId};
     },
@@ -204,8 +204,11 @@ const handlers = {
      * agent.aiScroll() - 滚动
      *     * params: { sessionId, locate, direction, scrollType?, distance? }
      */
-    async aiScroll({sessionId, locate, ...rest}) {
-        const options = cleanOptions(rest);
+    async aiScroll({sessionId, locate, direction, scrollType, distance}) {
+        const options = cleanOptions({scrollType, distance});
+        if (direction) {
+            options.direction = direction;
+        }
         await getSession(sessionId).agent.aiScroll(locate, options);
         return {ok: true};
     },

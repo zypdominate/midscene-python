@@ -25,14 +25,14 @@ class MidsceneAgent:
         self._node_manager = NodeServiceManager(self._config)
         self._node_manager.ensure_started()
         self._port = self._node_manager.port
-        
+
         # Call createSession with deviceId and optional aiActionContext
         create_params = {}
         if device_id:
             create_params["deviceId"] = device_id
         if self._config.ai_action_context:
             create_params["aiActionContext"] = self._config.ai_action_context
-            
+
         result = self._rpc("createSession", **create_params)
         self._session_id = result["sessionId"]
         self._device_id = result.get("deviceId") or device_id
@@ -81,12 +81,26 @@ class MidsceneAgent:
             scroll_type: Optional[str] = None,
             distance: Any = None,
     ) -> None:
+        if isinstance(distance, str):
+            distance_map = {"small": 200, "medium": 400, "large": 600}
+            distance_value = distance_map.get(distance, distance)
+        else:
+            distance_value = distance
+        if isinstance(scroll_type, str):
+            scroll_type_map = {
+                "SingleAction": "singleAction",
+                "ScrollToBottom": "scrollToBottom",
+                "ScrollToTop": "scrollToTop",
+                "ScrollToRight": "scrollToRight",
+                "ScrollToLeft": "scrollToLeft",
+            }
+            scroll_type = scroll_type_map.get(scroll_type, scroll_type)
         self._rpc(
             "aiScroll",
             locate=locate,
             direction=direction,
             scrollType=scroll_type,
-            distance=distance,
+            distance=distance_value,
         )
 
     def ai_pinch(
