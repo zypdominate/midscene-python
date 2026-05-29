@@ -81,6 +81,11 @@ class MidsceneAgent:
             scroll_type: Optional[str] = None,
             distance: Any = None,
     ) -> None:
+        """
+        真正决定滚动行为的是后端的 Android 实现。
+        当 scroll_type='singleAction' 时，后端 忽略 distance 参数，执行固定长度的单次滑动手势，
+        因此 distance=500 与 distance=1000 的效果相同。
+        """
         if isinstance(distance, str):
             distance_map = {"small": 200, "medium": 400, "large": 600}
             distance_value = distance_map.get(distance, distance)

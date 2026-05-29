@@ -521,9 +521,9 @@ class TestAIActionsOnRealDevice:
 
     def test_scroll_down(self, real_agent):
         """aiScroll：向下滚动当前页面。"""
-        real_agent.ai_scroll(direction="down", scroll_type='singleAction', distance=1000)
-        real_agent.ai_scroll(direction="up", scroll_type='singleAction', distance=500)
-        real_agent.ai_scroll(scroll_type='ScrollToBottom', distance=1000)
+        real_agent.ai_scroll(direction="down", scroll_type='singleAction')
+        real_agent.ai_scroll(direction="up", scroll_type='singleAction')
+        real_agent.ai_scroll(scroll_type='ScrollToBottom')
 
     def test_wait_for_condition(self, real_agent):
         """
