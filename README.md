@@ -81,9 +81,9 @@ MIDSCENE_MODEL_FAMILY=qwen
 from midscene_android import MidsceneAgent
 
 # 从 .env 或环境变量自动读取配置
-agent = MidsceneAgent("emulator-5554")
+agent = MidsceneAgent("emulator-5556")
 
-try:
+with MidsceneAgent("emulator-5556") as agent:
     agent.ai_action("等待应用首页加载完成")
     agent.ai_tap("登录按钮")
     agent.ai_input("用户名输入框", "testuser")
@@ -91,8 +91,6 @@ try:
     agent.ai_tap("确认登录")
     agent.ai_wait_for("登录成功，显示用户首页", timeout_ms=10000)
     agent.ai_assert("当前页面是用户首页")
-finally:
-    agent.destroy()
 ```
 
 ### 3. 在 pytest 中使用
@@ -104,7 +102,7 @@ from midscene_android import MidsceneAgent
 
 @pytest.fixture
 def agent():
-    ag = MidsceneAgent("emulator-5554")
+    ag = MidsceneAgent("emulator-5556")
     yield ag
     ag.destroy()
 
@@ -130,7 +128,7 @@ def test_login(agent: MidsceneAgent):
 from midscene_android import MidsceneAgent, MidsceneConfig
 
 # 方式一：从 .env / 环境变量自动读取（推荐）
-agent = MidsceneAgent("emulator-5554")
+agent = MidsceneAgent("emulator-5556")
 
 # 方式二：代码直接传入
 config = MidsceneConfig(
@@ -139,7 +137,7 @@ config = MidsceneConfig(
     model_name="qwen-vl-max",
     model_family="qwen",          # 可选，默认 "openai"
 )
-agent = MidsceneAgent("emulator-5554", config)
+agent = MidsceneAgent("emulator-5556", config)
 ```
 
 ### 支持的模型家族
@@ -171,7 +169,7 @@ agent = MidsceneAgent("emulator-5554", config)
 
 ```python
 agent = MidsceneAgent(device_id, config=None)
-# device_id : ADB 设备 ID，如 "emulator-5554" 或 "192.168.1.100:5555"
+# device_id : ADB 设备 ID，如 "emulator-5556" 或 "192.168.1.100:5555"
 # config    : MidsceneConfig 实例，可选，默认从环境变量读取
 
 agent.destroy()        # 释放 session，进程退出时自动调用
@@ -283,10 +281,10 @@ pos = agent.ai_locate("确认按钮")
 ### 原生 ADB
 
 ```python
-agent.run_adb_shell(command: str, timeout: int = None) -> str
-# 执行 adb shell 命令，返回输出文本
+agent.run_adb_shell(command: str, timeout_ms: int = None) -> str
+# 执行 adb shell 命令，返回输出文本；timeout_ms 单位为毫秒
 output = agent.run_adb_shell("dumpsys activity top | grep 'ACTIVITY'")
-output = agent.run_adb_shell("pm list packages | grep com.example")
+output = agent.run_adb_shell("pm list packages | grep com.example", timeout_ms=5000)
 ```
 
 ---
@@ -339,12 +337,11 @@ python tools/fetch_node_binaries.py --platform darwin-arm64  # macOS Apple Silic
 ### 运行测试
 
 ```bash
-# 单元测试 + 集成测试（无需 Android 设备）
-pytest tests/test_core.py tests/test_agent_integration.py -v -k "not device"
+# 集成测试（无需 Android 设备）
+pytest tests/ -m "not device" -v
 
-# 需要真实 Android 设备的测试
-ANDROID_DEVICE_ID=emulator-5554 \
-pytest tests/test_agent_integration.py -m device -v -s
+# 需要真实 Android 设备的测试（需配置好 .env 并连接设备）
+pytest tests/ -m device -v -s
 ```
 
 ### 构建发行包
@@ -360,12 +357,12 @@ python tools/build_platform_wheel.py --platform linux-x64
 python tools/build_platform_wheel.py --all
 
 # dist/ 目录结果示例：
-# midscene_android-0.1.0.tar.gz                               ← 源码包
-# midscene_android-0.1.0-py3-none-win_amd64.whl               ← Windows
-# midscene_android-0.1.0-py3-none-manylinux_2_17_x86_64.whl  ← Linux x64
-# midscene_android-0.1.0-py3-none-manylinux_2_17_aarch64.whl ← Linux ARM
-# midscene_android-0.1.0-py3-none-macosx_10_14_x86_64.whl    ← macOS Intel
-# midscene_android-0.1.0-py3-none-macosx_11_0_arm64.whl      ← macOS Apple Silicon
+# midscene_android-0.2.0.tar.gz                               ← 源码包
+# midscene_android-0.2.0-py3-none-win_amd64.whl               ← Windows
+# midscene_android-0.2.0-py3-none-manylinux_2_17_x86_64.whl  ← Linux x64
+# midscene_android-0.2.0-py3-none-manylinux_2_17_aarch64.whl ← Linux ARM
+# midscene_android-0.2.0-py3-none-macosx_10_14_x86_64.whl    ← macOS Intel
+# midscene_android-0.2.0-py3-none-macosx_11_0_arm64.whl      ← macOS Apple Silicon
 ```
 
 ### 项目结构
@@ -378,17 +375,18 @@ midscene_android/
 ├── node_service.py      # NodeServiceManager（进程级单例）
 ├── runtime.py           # Node 二进制管理、npm install、版本缓存
 ├── exceptions.py        # 异常类
-├── _node_service/
-│   ├── service.js       # Node.js RPC 服务（JSON-RPC 2.0）
-│   └── package.json     # @midscene/android 依赖声明
 └── _node_driver/
     ├── bin/             # 各平台 Node 二进制（5 平台，wheel 打包时按平台选一）
-    └── npm/             # 内置 npm（用于首次 npm install，无需系统 npm）
+    ├── npm/             # 内置 npm（用于首次 npm install，无需系统 npm）
+    └── src/
+        ├── service.js   # Node.js RPC 服务（JSON-RPC 2.0）
+        └── package.json # @midscene/android 依赖声明
 
 tests/
-├── test_core.py                # 单元测试（使用 stub RPC 服务器）
+├── conftest.py                 # 共享 fixture（dummy_config、singleton 清理、device marker）
+├── test_node_service.py        # Node 二进制与服务启动测试
 ├── test_agent_integration.py   # 集成测试（Level 1/2 无需设备，Level 3 需要设备）
-└── example_integration.py      # 集成示例代码
+└── test_example_integration.py # 示例集成测试
 
 tools/
 ├── fetch_node_binaries.py      # 下载 Node 二进制（开发时使用）

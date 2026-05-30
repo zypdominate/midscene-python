@@ -1,5 +1,6 @@
 """MidsceneAgent：Python 侧 Android AI 操作接口。"""
 
+import logging
 import uuid
 from typing import Any, Optional
 
@@ -8,6 +9,8 @@ import requests
 from .config import MidsceneConfig
 from .exceptions import MidsceneError, MidsceneRPCError
 from .node_service import NodeServiceManager
+
+logger = logging.getLogger(__name__)
 
 _TIMEOUT = 120
 
@@ -25,8 +28,8 @@ class MidsceneAgent:
         self._node_manager = NodeServiceManager(self._config)
         self._node_manager.ensure_started()
         self._port = self._node_manager.port
+        self._http_session = requests.Session()
 
-        # Call createSession with deviceId and optional aiActionContext
         create_params = {}
         if device_id:
             create_params["deviceId"] = device_id
@@ -37,6 +40,16 @@ class MidsceneAgent:
         self._session_id = result["sessionId"]
         self._device_id = result.get("deviceId") or device_id
 
+    # ── Context manager ──────────────────────────────────────────────────────────
+
+    def __enter__(self) -> "MidsceneAgent":
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        self.destroy()
+
+    # ── Internal RPC ─────────────────────────────────────────────────────────────
+
     def _rpc(self, method: str, timeout: int = _TIMEOUT, **params: Any) -> dict[str, Any]:
         if self._closed:
             raise MidsceneError("Agent has been destroyed; create a new MidsceneAgent instance")
@@ -44,7 +57,7 @@ class MidsceneAgent:
         if self._session_id is not None and method != "createSession":
             params["sessionId"] = self._session_id
 
-        resp = requests.post(
+        resp = self._http_session.post(
             f"http://127.0.0.1:{self._port}/rpc",
             json={
                 "jsonrpc": "2.0",
@@ -64,6 +77,8 @@ class MidsceneAgent:
                 err.get("stack"),
             )
         return body.get("result", {})
+
+    # ── AI actions ───────────────────────────────────────────────────────────────
 
     def ai_action(self, prompt: str) -> None:
         self._rpc("aiAct", prompt=prompt)
@@ -86,7 +101,7 @@ class MidsceneAgent:
     ) -> None:
         """
         真正决定滚动行为的是后端的 Android 实现。
-        当 scroll_type='singleAction' 时，后端 忽略 distance 参数，执行固定长度的单次滑动手势，
+        当 scroll_type='singleAction' 时，后端忽略 distance 参数，执行固定长度的单次滑动手势，
         因此 distance=500 与 distance=1000 的效果相同。
         """
         if isinstance(distance, str):
@@ -220,10 +235,22 @@ class MidsceneAgent:
         """Get the current status of the agent session."""
         return self._rpc("getStatus")
 
-    def run_adb_shell(self, command: str, timeout: Optional[int] = None) -> str:
-        rpc_timeout = max(_TIMEOUT, timeout // 1000 + 10) if timeout else _TIMEOUT
-        result = self._rpc("runAdbShell", timeout=rpc_timeout, command=command, timeoutMs=timeout)
+    def run_adb_shell(self, command: str, timeout_ms: Optional[int] = None) -> str:
+        """Run an ADB shell command on the connected device.
+
+        Args:
+            command: The shell command to execute.
+            timeout_ms: Timeout in **milliseconds**. Defaults to None (uses the
+                Node service default). Example: ``timeout_ms=5000`` for 5 seconds.
+
+        Returns:
+            The stdout output of the command as a string.
+        """
+        rpc_timeout = max(_TIMEOUT, timeout_ms // 1000 + 10) if timeout_ms else _TIMEOUT
+        result = self._rpc("runAdbShell", timeout=rpc_timeout, command=command, timeoutMs=timeout_ms)
         return result.get("output", "")
+
+    # ── Lifecycle ────────────────────────────────────────────────────────────────
 
     def destroy(self) -> None:
         if self._closed:
@@ -232,9 +259,10 @@ class MidsceneAgent:
             try:
                 self._rpc("destroySession", sessionId=self._session_id)
             except Exception as e:
-                print(f"Error destroying session {self._session_id}: {e}")
+                logger.warning(f"Error destroying session {self._session_id}: {e}")
         self._session_id = None
         self._closed = True
+        self._http_session.close()
 
     def is_closed(self) -> bool:
         return self._closed

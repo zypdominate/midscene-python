@@ -516,7 +516,7 @@ class TestAIActionsOnRealDevice:
         result = real_agent.ai_query(
             '"当前屏幕上可见的主要文字内容，如果没有则返回空字符串"'
         )
-        assert result is not None or result is None
+        assert isinstance(result, str), f"Expected str from ai_query, got {type(result)}: {result!r}"
         print(f"\n  Query result: {result!r}")
 
     def test_scroll_down(self, real_agent):
