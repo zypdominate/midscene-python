@@ -6,7 +6,7 @@ from typing import Any, Optional
 import requests
 
 from .config import MidsceneConfig
-from .exceptions import MidsceneRPCError
+from .exceptions import MidsceneError, MidsceneRPCError
 from .node_service import NodeServiceManager
 
 _TIMEOUT = 120
@@ -38,6 +38,9 @@ class MidsceneAgent:
         self._device_id = result.get("deviceId") or device_id
 
     def _rpc(self, method: str, timeout: int = _TIMEOUT, **params: Any) -> dict[str, Any]:
+        if self._closed:
+            raise MidsceneError("Agent has been destroyed; create a new MidsceneAgent instance")
+
         if self._session_id is not None and method != "createSession":
             params["sessionId"] = self._session_id
 

@@ -6,6 +6,8 @@ import subprocess
 import threading
 from pathlib import Path
 
+from .exceptions import MidsceneSetupError
+
 logger = logging.getLogger(__name__)
 
 # ─── 路径常量 ──────────────────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ def get_node_bin() -> Path:
 
     path = NODE_BIN_DIR / name
     if not path.exists():
-        raise FileNotFoundError(
+        raise MidsceneSetupError(
             f"Bundled Node binary not found: {path}\n"
             f"Run: python tools/fetch_node_binaries.py"
         )
@@ -62,7 +64,7 @@ def get_node_bin() -> Path:
 def get_npm_cli() -> Path:
     """返回内置 npm-cli.js 路径，不存在时给出明确提示。"""
     if not NPM_CLI.exists():
-        raise FileNotFoundError(
+        raise MidsceneSetupError(
             f"Bundled npm-cli.js not found: {NPM_CLI}\n"
             f"Run: python tools/fetch_node_binaries.py"
         )
@@ -154,7 +156,7 @@ def is_cache_stale() -> bool:
 
 
 def sync_node_service_sources() -> None:
-    """将 _node_service 源码同步到缓存目录（不触发 npm install）。"""
+    """将 _node_driver/src 源码同步到缓存目录（不触发 npm install）。"""
     NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
     for src in NODE_SVC_SRC.iterdir():
         dst = NODE_SVC_CACHE / src.name
@@ -267,13 +269,13 @@ def run_subprocess(
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         proc.kill()
-        raise RuntimeError(f"{error_prefix}: timed out after {timeout}s")
+        raise MidsceneSetupError(f"{error_prefix}: timed out after {timeout}s")
 
     t.join(timeout=5)
 
     if proc.returncode != 0:
         tail = "\n".join(lines[-30:])
-        raise RuntimeError(f"{error_prefix} (exit={proc.returncode}):\n{tail}")
+        raise MidsceneSetupError(f"{error_prefix} (exit={proc.returncode}):\n{tail}")
 
 
 def print_banner(*lines: str) -> None:

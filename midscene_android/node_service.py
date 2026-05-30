@@ -21,6 +21,7 @@ from typing import Optional
 
 from . import runtime
 from .config import MidsceneConfig
+from .exceptions import MidsceneNodeServiceError
 
 
 # ─── 进程级单例 ────────────────────────────────────────────────────────────────
@@ -47,6 +48,13 @@ class NodeServiceManager:
             return cls._instance
 
     def __init__(self, config: MidsceneConfig) -> None:
+        """Initialize the singleton Node service manager.
+
+        Note: Only the **first** call's ``config`` takes effect. Subsequent
+        calls with a different config are silently ignored because the Node
+        process (and its environment variables, including API keys) is already
+        running. If you need a different config, restart the Python process.
+        """
         if self._initialized:
             return
         self._config = config
@@ -61,7 +69,7 @@ class NodeServiceManager:
     @property
     def port(self) -> int:
         if self._port is None:
-            raise RuntimeError("NodeServiceManager not started yet")
+            raise MidsceneNodeServiceError("NodeServiceManager not started yet")
         return self._port
 
     def ensure_started(self) -> None:
@@ -143,7 +151,7 @@ class NodeServiceManager:
         while time.monotonic() < deadline:
             if self._proc.poll() is not None:
                 stderr = self._proc.stderr.read() if self._proc.stderr else ""
-                raise RuntimeError(
+                raise MidsceneNodeServiceError(
                     f"Node service exited unexpectedly "
                     f"(code={self._proc.returncode}).\nstderr:\n{stderr}"
                 )
@@ -156,7 +164,7 @@ class NodeServiceManager:
             if line.startswith("MIDSCENE_SERVICE_READY:"):
                 return int(line.split(":", 1)[1])
 
-        raise RuntimeError(
+        raise MidsceneNodeServiceError(
             f"Midscene Node service did not become ready within {timeout}s"
         )
 

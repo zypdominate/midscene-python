@@ -313,8 +313,9 @@ except MidsceneRPCError as e:
 |------|---------|
 | `AssertionError` | `ai_assert()` 条件不满足 |
 | `MidsceneRPCError` | Node.js 侧业务错误（ADB 断开、元素找不到等） |
-| `MidsceneSetupError` | Node 二进制缺失、npm install 失败 |
-| `OSError` | 环境变量未配置（缺少 `MIDSCENE_MODEL_*`） |
+| `MidsceneSetupError` | Node 二进制缺失、npm install 失败、环境变量未配置 |
+| `MidsceneNodeServiceError` | Node.js 服务启动失败或意外退出 |
+| `MidsceneError` | 使用已 `destroy()` 的 Agent |
 
 ---
 
