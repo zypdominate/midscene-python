@@ -1,6 +1,6 @@
 # Node 二进制（体积大，不提交 git，由开发者脚本下载后打包进 wheel）
-midscene_android/_runtime/bin/node-*
-midscene_android/_runtime/npm/
+midscene_android/_node_driver/bin/node-*
+midscene_android/_node_driver/npm/
 
 # Python 构建产物
 dist/

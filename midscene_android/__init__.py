@@ -29,15 +29,26 @@ MidsceneRPCError - RPC 通信异常
 """
 
 from .config import MidsceneConfig
-from .exceptions import MidsceneError, MidsceneRPCError, MidsceneSetupError
+from .exceptions import (
+    MidsceneError,
+    MidsceneNodeServiceError,
+    MidsceneRPCError,
+    MidsceneSetupError,
+)
 from .midscene_agent import MidsceneAgent
 
 __all__ = [
     "MidsceneAgent",
     "MidsceneConfig",
     "MidsceneError",
+    "MidsceneNodeServiceError",
     "MidsceneRPCError",
     "MidsceneSetupError",
 ]
 
-__version__ = "0.1.0"
+try:
+    from importlib.metadata import version
+
+    __version__ = version("midscene-android")
+except Exception:
+    __version__ = "dev"

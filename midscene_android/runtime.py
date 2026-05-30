@@ -43,7 +43,7 @@ def get_node_bin() -> Path:
     if not path.exists():
         raise FileNotFoundError(
             f"Bundled Node binary not found: {path}\n"
-            f"Run: python scripts/fetch_node_binaries.py"
+            f"Run: python tools/fetch_node_binaries.py"
         )
 
     if system != "windows":
@@ -64,7 +64,7 @@ def get_npm_cli() -> Path:
     if not NPM_CLI.exists():
         raise FileNotFoundError(
             f"Bundled npm-cli.js not found: {NPM_CLI}\n"
-            f"Run: python scripts/fetch_node_binaries.py"
+            f"Run: python tools/fetch_node_binaries.py"
         )
     return NPM_CLI
 

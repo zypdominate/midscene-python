@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "midscene-android"
-version = "0.1.1"
+version = "0.2.0"
 description = "AI-powered Android automation via Midscene.js, bridged into Python"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -21,18 +21,16 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-    "pytest>=8.4.2",
     "python-dotenv>=1.2.1",
     "requests>=2.28",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
+    "pytest>=8.0",
     "pytest-mock",
     "build",
     "twine",
-    "requests",
     "ruff",
 ]
 
@@ -65,15 +63,15 @@ include = ["midscene_android*"]
 [tool.setuptools.package-data]
 midscene_android = [
     # 平台 Node 可执行文件（构建时只保留目标平台的文件，其余已删除）
-    "_runtime/bin/node-linux-x64",
-    "_runtime/bin/node-linux-arm64",
-    "_runtime/bin/node-darwin-x64",
-    "_runtime/bin/node-darwin-arm64",
-    "_runtime/bin/node-win32-x64.exe",
-    "_runtime/bin/node.cmd",          # Windows PATH shim
+    "_node_driver/bin/node-linux-x64",
+    "_node_driver/bin/node-linux-arm64",
+    "_node_driver/bin/node-darwin-x64",
+    "_node_driver/bin/node-darwin-arm64",
+    "_node_driver/bin/node-win32-x64.exe",
+    "_node_driver/bin/node.cmd",          # Windows PATH shim
     # 内置 npm（npm install 时使用，无需系统 npm）
-    "_runtime/npm/**",
+    "_node_driver/npm/**",
     # Node.js RPC 服务源码
-    "_node_service/package.json",
-    "_node_service/service.js",
+    "_node_driver/src/package.json",
+    "_node_driver/src/service.js",
 ]
