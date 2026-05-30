@@ -6,6 +6,9 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+# 模块加载时执行一次，override=False 保留进程中已有的环境变量
+load_dotenv(override=False)
+
 
 @dataclass
 class MidsceneConfig:
@@ -20,7 +23,6 @@ class MidsceneConfig:
     ai_action_context: Optional[str] = None
 
     def __post_init__(self) -> None:
-        load_dotenv()
         self.base_url = self.base_url or os.environ.get("MIDSCENE_MODEL_BASE_URL")
         self.api_key = self.api_key or os.environ.get("MIDSCENE_MODEL_API_KEY")
         self.model_name = self.model_name or os.environ.get("MIDSCENE_MODEL_NAME")
