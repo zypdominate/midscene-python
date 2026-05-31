@@ -37,16 +37,15 @@ class TestBasicAndroidActions:
 
     def test_system_navigation(self, agent: MidsceneAgent):
         """测试基础系统导航操作。"""
-        # 返回主页
         agent.home()
         agent.ai_assert("我正处于手机主屏幕或桌面")
 
-        # 打开最近应用界面
+        # 各厂商多任务 UI 差异大，断言「离开桌面」比识别卡片列表更稳定
         agent.recent_apps()
-        agent.ai_assert("我看到了最近运行的应用列表")
+        agent.ai_assert("当前界面不是主屏幕桌面，而是多任务或应用切换界面")
 
-        # 返回桌面
         agent.home()
+        agent.ai_assert("我回到了手机主屏幕或桌面")
 
     def test_settings_interaction(self, agent: MidsceneAgent):
         """测试系统设置页面的基本操作。"""

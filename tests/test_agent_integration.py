@@ -28,7 +28,7 @@ import uuid
 import pytest
 import requests
 
-from midscene_android import runtime
+from midscene_android import runtime, MidsceneNodeServiceError
 from midscene_android.config import MidsceneConfig
 from midscene_android.midscene_agent import MidsceneAgent
 from midscene_android.node_service import NodeServiceManager
@@ -213,11 +213,11 @@ class TestNodeServiceManagerLifecycle:
     def teardown_method(self):
         _reset_singleton()
 
-    def test_port_before_start_raises_runtime_error(self):
-        """访问 .port 必须在 ensure_started() 之前抛出 RuntimeError。"""
+    def test_port_before_start_raises_node_service_error(self):
+        """访问 .port 必须在 ensure_started() 之前抛出 MidsceneNodeServiceError。"""
         config = MidsceneConfig.from_env()
         mgr = NodeServiceManager(config)
-        with pytest.raises(RuntimeError, match="not started"):
+        with pytest.raises(MidsceneNodeServiceError, match="not started"):
             _ = mgr.port
 
     def test_ensure_started_assigns_valid_port(self):
