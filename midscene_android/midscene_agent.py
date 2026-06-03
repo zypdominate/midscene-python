@@ -1,13 +1,10 @@
 """MidsceneAgent：Python 侧 Android AI 操作接口。"""
 
 import logging
-import uuid
 from typing import Any, Optional
 
-import requests
-
 from .config import MidsceneConfig
-from .exceptions import MidsceneError, MidsceneRPCError
+from .exceptions import MidsceneError
 from .node_service import NodeServiceManager
 
 logger = logging.getLogger(__name__)
@@ -27,8 +24,6 @@ class MidsceneAgent:
         self._config = config or MidsceneConfig.from_env()
         self._node_manager = NodeServiceManager(self._config)
         self._node_manager.ensure_started()
-        self._port = self._node_manager.port
-        self._http_session = requests.Session()
 
         create_params = {}
         if device_id:
@@ -57,26 +52,7 @@ class MidsceneAgent:
         if self._session_id is not None and method != "createSession":
             params["sessionId"] = self._session_id
 
-        resp = self._http_session.post(
-            f"http://127.0.0.1:{self._port}/rpc",
-            json={
-                "jsonrpc": "2.0",
-                "id": str(uuid.uuid4()),
-                "method": method,
-                "params": params,
-            },
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        if "error" in body:
-            err = body["error"]
-            raise MidsceneRPCError(
-                err.get("message", "RPC error"),
-                err.get("code", -1),
-                err.get("stack"),
-            )
-        return body.get("result", {})
+        return self._node_manager.rpc(method, timeout=timeout, **params)
 
     # ── AI actions ───────────────────────────────────────────────────────────────
 
@@ -262,7 +238,6 @@ class MidsceneAgent:
                 logger.warning(f"Error destroying session {self._session_id}: {e}")
         self._session_id = None
         self._closed = True
-        self._http_session.close()
 
     def is_closed(self) -> bool:
         return self._closed

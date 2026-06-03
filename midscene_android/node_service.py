@@ -17,11 +17,14 @@ import atexit
 import subprocess
 import threading
 import time
-from typing import Optional
+import uuid
+from typing import Any, Optional
+
+import requests
 
 from . import runtime
 from .config import MidsceneConfig
-from .exceptions import MidsceneNodeServiceError
+from .exceptions import MidsceneNodeServiceError, MidsceneRPCError
 
 
 # ─── 进程级单例 ────────────────────────────────────────────────────────────────
@@ -81,23 +84,34 @@ class NodeServiceManager:
                 return
             self._start()
 
-    def get_connected_devices(self) -> list[dict[str, str]]:
-        """获取当前已连接的 Android 设备列表。"""
-        self.ensure_started()
-        import requests
-        import uuid
+    def rpc(self, method: str, timeout: int = 10, **params: Any) -> dict[str, Any]:
+        """通用 RPC 调用方法。"""
         resp = requests.post(
             f"http://127.0.0.1:{self.port}/rpc",
             json={
                 "jsonrpc": "2.0",
                 "id": str(uuid.uuid4()),
-                "method": "getConnectedDevices",
-                "params": {},
+                "method": method,
+                "params": params,
             },
-            timeout=10,
+            timeout=timeout,
         )
         resp.raise_for_status()
-        return resp.json().get("result", {}).get("devices", [])
+        body = resp.json()
+        if "error" in body:
+            err = body["error"]
+            raise MidsceneRPCError(
+                err.get("message", "RPC error"),
+                err.get("code", -1),
+                err.get("stack"),
+            )
+        return body.get("result", {})
+
+    def get_connected_devices(self) -> list[dict[str, str]]:
+        """获取当前已连接的 Android 设备列表。"""
+        self.ensure_started()
+        result = self.rpc("getConnectedDevices")
+        return result.get("devices", [])
 
     # ── 内部实现 ────────────────────────────────────────────────────────────────
 
