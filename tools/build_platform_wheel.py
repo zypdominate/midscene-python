@@ -142,31 +142,31 @@ def _restore_binaries(backed_up: dict[str, Path]) -> None:
 
 def build_sdist() -> Path:
     """
-    构建源码包 (.tar)。
+    构建源码包 (.tar.gz)。
 
     sdist 包含所有 Python 源码和 service.js，但不含 Node 二进制
     （Node 二进制是平台相关的大文件，由各平台 wheel 单独携带）。
     安装时若无匹配 wheel，pip 会下载 sdist 并提示用户手动运行
     fetch_node_binaries.py。
 
-    构建工具：python setup.py sdist --formats=tar
+    构建工具：python setup.py sdist --formats=gztar
     """
     print(f"\n{'=' * 60}")
-    print("  Building sdist (.tar)")
+    print("  Building sdist (.tar.gz)")
     print(f"{'=' * 60}")
 
     DIST_DIR.mkdir(exist_ok=True)
     _run(
-        [sys.executable, "setup.py", "sdist", "--formats=tar", f"--dist-dir={DIST_DIR}"]
+        [sys.executable, "setup.py", "sdist", "--formats=gztar", f"--dist-dir={DIST_DIR}"]
     )
 
     tarballs = sorted(
-        DIST_DIR.glob("*.tar"),
+        DIST_DIR.glob("*.tar.gz"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if not tarballs:
-        raise FileNotFoundError(f"No .tar found in {DIST_DIR}")
+        raise FileNotFoundError(f"No .tar.gz found in {DIST_DIR}")
 
     sdist_path = tarballs[0]
     size_kb = sdist_path.stat().st_size / 1024
