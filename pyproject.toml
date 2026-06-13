@@ -75,6 +75,6 @@ midscene_android = [
     # 内置 npm（npm install 时使用，无需系统 npm）
     "_node_driver/npm/**",
     # Node.js RPC 服务源码
-    "_node_driver/src/package.json",
-    "_node_driver/src/service.js",
+    "_node_driver/service/package.json",
+    "_node_driver/service/service.js",
 ]

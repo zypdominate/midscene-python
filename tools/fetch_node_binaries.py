@@ -31,6 +31,7 @@ NPM_DIR = PACKAGE_DIR / "_node_driver" / "npm"
 DEFAULT_NODE_VERSION = "22.12.0"
 
 PLATFORMS = {
+    # npm_prefix：Node 官方压缩包内 npm 目录的路径前缀（用于解压提取内置 npm），
     "linux-x64": {
         "archive": "node-v{version}-linux-x64.tar.gz",
         "bin_in_archive": "node-v{version}-linux-x64/bin/node",

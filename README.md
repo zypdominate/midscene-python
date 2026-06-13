@@ -378,7 +378,7 @@ midscene_android/
 └── _node_driver/
     ├── bin/             # 各平台 Node 二进制（5 平台，wheel 打包时按平台选一）
     ├── npm/             # 内置 npm（用于首次 npm install，无需系统 npm）
-    └── src/
+    └── service/
         ├── service.js   # Node.js RPC 服务（JSON-RPC 2.0）
         └── package.json # @midscene/android 依赖声明
 

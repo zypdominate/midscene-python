@@ -3,8 +3,8 @@ exclude midscene_android/_node_driver/bin/node-*
 exclude midscene_android/_node_driver/npm/
 
 # 包含必要的源码文件
-include midscene_android/_node_driver/src/*.js
-include midscene_android/_node_driver/src/*.json
+include midscene_android/_node_driver/service/*.js
+include midscene_android/_node_driver/service/*.json
 include README.md
 include LICENSE
 include pyproject.toml

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 PACKAGE_DIR = Path(__file__).parent
 NODE_BIN_DIR = PACKAGE_DIR / "_node_driver" / "bin"
 NPM_CLI = PACKAGE_DIR / "_node_driver" / "npm" / "bin" / "npm-cli.js"
-NODE_SVC_SRC = PACKAGE_DIR / "_node_driver" / "src"  # package.json + service.js
+NODE_SERVICE_DIR = PACKAGE_DIR / "_node_driver" / "service"  # package.json + service.js
 
 CACHE_DIR = Path.home() / ".midscene_android"
 NODE_SVC_CACHE = CACHE_DIR / "node_service"  # npm install 目标目录
@@ -153,13 +153,13 @@ def _sha256_file(path: Path) -> str:
 
 
 def _bundled_package_json_hash() -> str:
-    return _sha256_file(NODE_SVC_SRC / "package.json")
+    return _sha256_file(NODE_SERVICE_DIR / "package.json")
 
 
 def is_bundled_source_newer_than_cache() -> bool:
-    """检查 _node_driver/src 中的 package.json / service.js 是否与缓存不一致。"""
+    """检查 _node_driver/service 中的 package.json / service.js 是否与缓存不一致。"""
     for name in SERVICE_SOURCE_FILES:
-        src = NODE_SVC_SRC / name
+        src = NODE_SERVICE_DIR / name
         dst = NODE_SVC_CACHE / name
         if not src.is_file():
             raise MidsceneSetupError(
@@ -205,10 +205,10 @@ def is_cache_stale() -> bool:
 
 
 def sync_node_service_sources() -> None:
-    """将 _node_driver/src 源码同步到缓存目录（不触发 npm install）。"""
+    """将 _node_driver/service 源码同步到缓存目录（不触发 npm install）。"""
     NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
     for name in SERVICE_SOURCE_FILES:
-        src = NODE_SVC_SRC / name
+        src = NODE_SERVICE_DIR / name
         dst = NODE_SVC_CACHE / name
         shutil.copy2(src, dst)
         logger.debug("Synced %s → %s", src.name, dst)
