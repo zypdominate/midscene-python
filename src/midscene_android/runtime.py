@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import platform
@@ -23,6 +24,10 @@ NPM_DONE_FLAG = NODE_SVC_CACHE / ".npm_install_done"
 VERSION_FILE = NODE_SVC_CACHE / ".package_version"  # 缓存版本戳，用于失效检测
 
 NPM_INSTALL_TIMEOUT = 300  # 秒
+
+# 随 wheel 分发的 Node 服务源码（package.json 变更需重新 npm install）
+SERVICE_SOURCE_FILES = ("package.json", "service.js")
+PACKAGE_JSON_HASH_FILE = NODE_SVC_CACHE / ".package_json.sha256"
 
 
 # ─── 平台检测 ──────────────────────────────────────────────────────────────────
@@ -98,23 +103,31 @@ def ensure_node_shim(node_bin: Path) -> None:
     在内置 Node bin 目录创建裸名称的 shim，
     使 npm 内部 fork 调用 "node"（无后缀/无平台名）时能正确找到内置二进制。
 
-    Windows：创建 node.cmd（批处理跳板）
-    Linux/macOS：创建 node 符号链接
+    Windows：node.cmd + node.exe（cmd.exe 生命周期脚本优先找 node.exe）
+    Linux/macOS：node 符号链接
     """
     system = platform.system().lower()
+    bin_dir = node_bin.parent
 
     if system == "windows":
-        shim = node_bin.parent / "node.cmd"
-        if not shim.exists():
-            # %* 转发所有参数
-            shim.write_text(
-                f'@echo off\n"{node_bin}" %*\n',
-                encoding="utf-8",
-            )
-            logger.debug("Created node.cmd shim: %s", shim)
+        shim = bin_dir / "node.cmd"
+        expected_shim = f'@echo off\n"{node_bin.resolve()}" %*\n'
+        if not shim.exists() or shim.read_text(encoding="utf-8") != expected_shim:
+            shim.write_text(expected_shim, encoding="utf-8")
+            logger.debug("Created/updated node.cmd shim: %s", shim)
+
+        node_exe = bin_dir / "node.exe"
+        if not node_exe.exists() or node_exe.stat().st_size != node_bin.stat().st_size:
+            shutil.copy2(node_bin, node_exe)
+            logger.debug("Created/updated node.exe copy: %s", node_exe)
     else:
-        symlink = node_bin.parent / "node"
-        if not symlink.exists():
+        symlink = bin_dir / "node"
+        if symlink.is_symlink():
+            if symlink.resolve() != node_bin.resolve():
+                symlink.unlink()
+                symlink.symlink_to(node_bin.name)
+                logger.debug("Updated node symlink: %s → %s", symlink, node_bin.name)
+        elif not symlink.exists():
             symlink.symlink_to(node_bin.name)
             logger.debug("Created node symlink: %s → %s", symlink, node_bin.name)
 
@@ -129,10 +142,43 @@ def get_current_version() -> str:
     except Exception:
         # 开发模式下 importlib.metadata 可能找不到包，回退到读 __version__
         try:
-            from src.midscene_android import __version__
+            from midscene_android import __version__
             return __version__
         except Exception:
             return "unknown"
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _bundled_package_json_hash() -> str:
+    return _sha256_file(NODE_SVC_SRC / "package.json")
+
+
+def is_bundled_source_newer_than_cache() -> bool:
+    """检查 _node_driver/src 中的 package.json / service.js 是否与缓存不一致。"""
+    for name in SERVICE_SOURCE_FILES:
+        src = NODE_SVC_SRC / name
+        dst = NODE_SVC_CACHE / name
+        if not src.is_file():
+            raise MidsceneSetupError(
+                f"Missing bundled Node service source: {src}\n"
+                f"Run: python tools/fetch_node_binaries.py"
+            )
+        if not dst.is_file():
+            return True
+        if src.read_bytes() != dst.read_bytes():
+            return True
+    return False
+
+
+def _package_json_changed_since_install() -> bool:
+    """package.json 相对上次 npm install 是否有变化。"""
+    current = _bundled_package_json_hash()
+    if not PACKAGE_JSON_HASH_FILE.exists():
+        return True
+    return PACKAGE_JSON_HASH_FILE.read_text(encoding="utf-8").strip() != current
 
 
 def is_cache_stale() -> bool:
@@ -143,10 +189,13 @@ def is_cache_stale() -> bool:
     - npm 安装 flag 不存在（从未安装）
     - 版本文件不存在（旧版缓存，无版本记录）
     - 版本文件中记录的版本与当前包版本不一致（pip upgrade 后）
+    - 内置 package.json 相对上次 install 有变化
     """
     if not NPM_DONE_FLAG.exists():
         return True
     if not VERSION_FILE.exists():
+        return True
+    if _package_json_changed_since_install():
         return True
     try:
         cached_ver = VERSION_FILE.read_text(encoding="utf-8").strip()
@@ -158,20 +207,40 @@ def is_cache_stale() -> bool:
 def sync_node_service_sources() -> None:
     """将 _node_driver/src 源码同步到缓存目录（不触发 npm install）。"""
     NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
-    for src in NODE_SVC_SRC.iterdir():
-        dst = NODE_SVC_CACHE / src.name
+    for name in SERVICE_SOURCE_FILES:
+        src = NODE_SVC_SRC / name
+        dst = NODE_SVC_CACHE / name
         shutil.copy2(src, dst)
         logger.debug("Synced %s → %s", src.name, dst)
+
+
+def sync_node_service_sources_if_needed() -> bool:
+    """
+    若 bundled 源码比缓存新或内容不同，则同步。
+
+    Returns:
+        True 表示发生了同步。
+    """
+    if not is_bundled_source_newer_than_cache():
+        return False
+    sync_node_service_sources()
+    return True
 
 
 def invalidate_cache() -> None:
     """
     清除缓存中的 Node 服务文件（保留 node_modules 以加速重装）。
 
-    删除：service.js、package.json、done flag、version file。
+    删除：service.js、package.json、done flag、version file、package.json hash。
     保留：node_modules/（npm install 速度快很多）。
     """
-    for name in ("service.js", "package.json", NPM_DONE_FLAG.name, VERSION_FILE.name):
+    for name in (
+        "service.js",
+        "package.json",
+        NPM_DONE_FLAG.name,
+        VERSION_FILE.name,
+        PACKAGE_JSON_HASH_FILE.name,
+    ):
         target = NODE_SVC_CACHE / name
         try:
             target.unlink(missing_ok=True)
@@ -184,12 +253,15 @@ def ensure_node_service(node_bin: Path) -> None:
     """
     确保 Node 服务依赖已安装到缓存目录，并与当前包版本一致。
 
+    - 每次运行先检查 bundled package.json / service.js 是否最新并同步
     - 首次运行：执行完整的 npm install
-    - pip upgrade 后：检测到版本变化，重新复制源码并重新 npm install
-    - 无变化：跳过，直接返回
+    - pip upgrade 或 package.json 变更后：重新 npm install
+    - 无变化：跳过 install
     """
+    ensure_node_shim(node_bin)
+    sync_node_service_sources_if_needed()
+
     if not is_cache_stale():
-        sync_node_service_sources()
         logger.debug(
             "Node service cache is up-to-date (v%s), skipping install. cache=%s",
             get_current_version(),
@@ -199,6 +271,7 @@ def ensure_node_service(node_bin: Path) -> None:
 
     current_version = get_current_version()
     invalidate_cache()
+    sync_node_service_sources()
 
     print_banner(
         "Setting up @midscene/android Node service",
@@ -208,14 +281,9 @@ def ensure_node_service(node_bin: Path) -> None:
         "This may take a few minutes (requires npm registry access).",
     )
 
-    # shim：让 npm install 期间内部 fork 也走内置 Node
-    ensure_node_shim(node_bin)
-
-    sync_node_service_sources()
-
-    # 用内置 Node 执行内置 npm-cli.js，PATH 置顶确保全链路不走系统 node
+    # 内置 Node + 内置 npm（_node_driver/npm），PATH 置顶确保不走系统 node/npm
     npm_cli = get_npm_cli()
-    cmd = [str(node_bin), str(npm_cli), "install", "--production"]
+    cmd = [str(node_bin), str(npm_cli), "install", "--omit=dev"]
     env = make_node_env(node_bin)
 
     logger.debug("npm install: %s", " ".join(cmd))
@@ -230,6 +298,7 @@ def ensure_node_service(node_bin: Path) -> None:
 
     NPM_DONE_FLAG.touch()
     VERSION_FILE.write_text(current_version, encoding="utf-8")
+    PACKAGE_JSON_HASH_FILE.write_text(_bundled_package_json_hash(), encoding="utf-8")
     print(f"[midscene-android] npm install completed (v{current_version}).", flush=True)
 
 

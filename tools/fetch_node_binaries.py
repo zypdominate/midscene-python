@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-开发者工具：下载各平台 Node.js 二进制 + 完整 npm 包，放置到 _node_driver/ 目录。
+开发者工具：下载各平台 Node.js 二进制 + npm（来自 Node 官方发行包），放置到 src/midscene_android/_node_driver/。
 
-在发布新版本前运行：
-    python scripts/fetch_node_binaries.py
+npm 从 Node 官方包内的 node_modules/npm 提取（与 Node 版本配套），不使用系统 npm，
+也不单独下载 npm registry tgz（Windows 上易静默失败）。
 
-可选参数：
-    --node-version  指定 Node.js 版本（默认 22.12.0）
-    --platform      只下载指定平台（默认全部）
-                    可选: linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64
-    --skip-npm      跳过 npm 下载
-    --npm-version   指定 npm 版本（默认 10.9.2）
+用法：
+    python tools/fetch_node_binaries.py --platform win32-x64
+    python tools/fetch_node_binaries.py --platform win32-x64 --force-npm
 """
 
+from __future__ import annotations
+
 import argparse
+import shutil
 import stat
 import sys
 import tarfile
@@ -23,52 +23,50 @@ from pathlib import Path
 
 import requests
 
-# 目标目录
 SCRIPT_DIR = Path(__file__).parent
-PACKAGE_DIR = SCRIPT_DIR.parent / "midscene_android"
+PACKAGE_DIR = SCRIPT_DIR.parent / "src" / "midscene_android"
 NODE_BIN_DIR = PACKAGE_DIR / "_node_driver" / "bin"
 NPM_DIR = PACKAGE_DIR / "_node_driver" / "npm"
 
-# Node.js 默认版本（LTS）
 DEFAULT_NODE_VERSION = "22.12.0"
-DEFAULT_NPM_VERSION = "10.9.2"
 
-# 各平台下载配置
 PLATFORMS = {
     "linux-x64": {
         "archive": "node-v{version}-linux-x64.tar.gz",
         "bin_in_archive": "node-v{version}-linux-x64/bin/node",
+        "npm_prefix": "node-v{version}-linux-x64/lib/node_modules/npm/",
         "output": "node-linux-x64",
         "url": "https://nodejs.org/dist/v{version}/node-v{version}-linux-x64.tar.gz",
     },
     "linux-arm64": {
         "archive": "node-v{version}-linux-arm64.tar.gz",
         "bin_in_archive": "node-v{version}-linux-arm64/bin/node",
+        "npm_prefix": "node-v{version}-linux-arm64/lib/node_modules/npm/",
         "output": "node-linux-arm64",
         "url": "https://nodejs.org/dist/v{version}/node-v{version}-linux-arm64.tar.gz",
     },
     "darwin-x64": {
         "archive": "node-v{version}-darwin-x64.tar.gz",
         "bin_in_archive": "node-v{version}-darwin-x64/bin/node",
+        "npm_prefix": "node-v{version}-darwin-x64/lib/node_modules/npm/",
         "output": "node-darwin-x64",
         "url": "https://nodejs.org/dist/v{version}/node-v{version}-darwin-x64.tar.gz",
     },
     "darwin-arm64": {
         "archive": "node-v{version}-darwin-arm64.tar.gz",
         "bin_in_archive": "node-v{version}-darwin-arm64/bin/node",
+        "npm_prefix": "node-v{version}-darwin-arm64/lib/node_modules/npm/",
         "output": "node-darwin-arm64",
         "url": "https://nodejs.org/dist/v{version}/node-v{version}-darwin-arm64.tar.gz",
     },
     "win32-x64": {
         "archive": "node-v{version}-win-x64.zip",
         "bin_in_archive": "node-v{version}-win-x64/node.exe",
+        "npm_prefix": "node-v{version}-win-x64/node_modules/npm/",
         "output": "node-win32-x64.exe",
         "url": "https://nodejs.org/dist/v{version}/node-v{version}-win-x64.zip",
     },
 }
-
-# npm 完整包（从 registry 下载 tgz，解压整个 package/ 到 _node_driver/npm/）
-NPM_TGZ_URL = "https://registry.npmjs.org/npm/-/npm-{version}.tgz"
 
 
 def download_file(url: str, dest: Path, desc: str) -> None:
@@ -76,7 +74,7 @@ def download_file(url: str, dest: Path, desc: str) -> None:
     print(f"  URL: {url}")
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    with requests.get(url, stream=True) as resp:
+    with requests.get(url, stream=True, timeout=120) as resp:
         resp.raise_for_status()
         total_size = int(resp.headers.get("content-length", 0))
         downloaded = 0
@@ -91,6 +89,11 @@ def download_file(url: str, dest: Path, desc: str) -> None:
     print()
 
 
+def _chmod_executable(path: Path) -> None:
+    if not str(path).endswith(".exe"):
+        path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
 def extract_node_binary(archive_path: Path, bin_path_in_archive: str, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -100,110 +103,201 @@ def extract_node_binary(archive_path: Path, bin_path_in_archive: str, output_pat
             src = tar.extractfile(member)
             assert src is not None
             output_path.write_bytes(src.read())
-    elif str(archive_path).endswith(".zip"):
-        with zipfile.ZipFile(archive_path) as z:
-            data = z.read(bin_path_in_archive)
-            output_path.write_bytes(data)
+    else:
+        with zipfile.ZipFile(archive_path) as zf:
+            output_path.write_bytes(zf.read(bin_path_in_archive))
 
-    if not str(output_path).endswith(".exe"):
-        output_path.chmod(output_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
-    print(f"  ✓ Extracted: {output_path} ({output_path.stat().st_size // 1024 // 1024} MB)")
+    _chmod_executable(output_path)
+    print(f"  ✓ Node binary: {output_path} ({output_path.stat().st_size // 1024 // 1024} MB)")
 
 
-def fetch_node_binary(platform_key: str, version: str) -> None:
+def _clear_dir(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def extract_npm_from_tar(archive_path: Path, npm_prefix: str, dest: Path) -> None:
+    _clear_dir(dest)
+    count = 0
+    with tarfile.open(archive_path, "r:gz") as tar:
+        for member in tar.getmembers():
+            if not member.name.startswith(npm_prefix) or member.isdir():
+                continue
+            rel = member.name[len(npm_prefix):]
+            if not rel:
+                continue
+            out = dest / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            src = tar.extractfile(member)
+            assert src is not None
+            out.write_bytes(src.read())
+            count += 1
+    print(f"  ✓ npm extracted from Node tarball ({count} files) → {dest}")
+
+
+def extract_npm_from_zip(archive_path: Path, npm_prefix: str, dest: Path) -> None:
+    _clear_dir(dest)
+    count = 0
+    with zipfile.ZipFile(archive_path) as zf:
+        for name in zf.namelist():
+            if not name.startswith(npm_prefix) or name.endswith("/"):
+                continue
+            rel = name[len(npm_prefix):]
+            if not rel:
+                continue
+            out = dest / Path(rel.replace("\\", "/"))
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(zf.read(name))
+            count += 1
+    print(f"  ✓ npm extracted from Node zip ({count} files) → {dest}")
+
+
+def fetch_npm_from_node_archive(
+        platform_key: str,
+        version: str,
+        *,
+        force: bool,
+) -> None:
+    npm_cli = NPM_DIR / "bin" / "npm-cli.js"
+    if npm_cli.exists() and not force:
+        print(f"  ✓ npm already exists, skipping ({npm_cli})")
+        print("    Use --force-npm to re-extract from Node official bundle")
+        return
+
+    config = PLATFORMS[platform_key]
+    url = config["url"].format(version=version)
+    archive_name = config["archive"].format(version=version)
+    npm_prefix = config["npm_prefix"].format(version=version)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        archive_path = Path(tmp) / archive_name
+        download_file(url, archive_path, f"Node.js {version} ({platform_key}, for npm)")
+        if str(archive_path).endswith(".tar.gz"):
+            extract_npm_from_tar(archive_path, npm_prefix, NPM_DIR)
+        else:
+            extract_npm_from_zip(archive_path, npm_prefix, NPM_DIR)
+
+    if not npm_cli.exists():
+        raise RuntimeError(f"npm extraction failed: {npm_cli} not found")
+
+
+def fetch_node_binary(platform_key: str, version: str, *, extract_npm: bool, force_npm: bool) -> None:
     config = PLATFORMS[platform_key]
     url = config["url"].format(version=version)
     archive_name = config["archive"].format(version=version)
     bin_in_archive = config["bin_in_archive"].format(version=version)
+    npm_prefix = config["npm_prefix"].format(version=version)
     output = NODE_BIN_DIR / config["output"]
-
-    if output.exists():
-        print(f"  ✓ Already exists, skipping: {output.name}")
-        return
 
     with tempfile.TemporaryDirectory() as tmp:
         archive_path = Path(tmp) / archive_name
-        download_file(url, archive_path, f"Node.js {version} ({platform_key})")
-        extract_node_binary(archive_path, bin_in_archive, output)
+        need_download = not output.exists() or extract_npm or force_npm
+        if need_download:
+            download_file(url, archive_path, f"Node.js {version} ({platform_key})")
+        else:
+            print(f"  ✓ Node binary exists, skipping download: {output.name}")
+
+        if not output.exists():
+            extract_node_binary(archive_path, bin_in_archive, output)
+
+        if extract_npm or force_npm:
+            if force_npm and NPM_DIR.exists():
+                print("  Replacing bundled npm (--force-npm)")
+            if str(archive_path).endswith(".tar.gz"):
+                extract_npm_from_tar(archive_path, npm_prefix, NPM_DIR)
+            else:
+                extract_npm_from_zip(archive_path, npm_prefix, NPM_DIR)
 
 
-def fetch_npm(version: str = DEFAULT_NPM_VERSION) -> None:
-    """
-    下载完整 npm 包，解压到 _node_driver/npm/。
+def verify_bundled_npm(node_path: Path) -> None:
+    npm_cli = NPM_DIR / "bin" / "npm-cli.js"
+    if not npm_cli.exists():
+        raise RuntimeError(f"npm-cli.js missing: {npm_cli}")
+    import subprocess
 
-    npm tgz 内部结构为 package/...，解压后目录结构：
-      _node_driver/npm/bin/npm-cli.js   ← 入口
-      _node_driver/npm/lib/...
-      _node_driver/npm/node_modules/...
+    result = subprocess.run(
+        [str(node_path), str(npm_cli), "--version"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Bundled npm verification failed (exit={result.returncode})\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+    print(f"  ✓ npm verification OK: v{result.stdout.strip()}")
 
-    调用方式：<node_bin> _node_driver/npm/bin/npm-cli.js install
-    """
-    npm_cli_entry = NPM_DIR / "bin" / "npm-cli.js"
-    if npm_cli_entry.exists():
-        print(f"  ✓ npm already exists, skipping ({npm_cli_entry})")
-        return
 
-    url = NPM_TGZ_URL.format(version=version)
-    with tempfile.TemporaryDirectory() as tmp:
-        tgz_path = Path(tmp) / f"npm-{version}.tgz"
-        download_file(url, tgz_path, f"npm {version} (full package)")
+def _detect_current_platform() -> str:
+    import platform
 
-        NPM_DIR.mkdir(parents=True, exist_ok=True)
-        print(f"  Extracting to {NPM_DIR} ...")
-        with tarfile.open(tgz_path, "r:gz") as tar:
-            for member in tar.getmembers():
-                # 内部路径形如 package/bin/npm-cli.js，去掉 package/ 前缀
-                if not member.name.startswith("package/"):
-                    continue
-                rel = member.name[len("package/"):]
-                if not rel:
-                    continue
-                dest = NPM_DIR / rel
-                if member.isdir():
-                    dest.mkdir(parents=True, exist_ok=True)
-                elif member.isfile():
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    f = tar.extractfile(member)
-                    if f:
-                        dest.write_bytes(f.read())
-
-    print(f"  ✓ npm extracted: {npm_cli_entry}")
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if system == "windows":
+        return "win32-x64"
+    if system == "darwin":
+        return "darwin-arm64" if machine in ("arm64", "aarch64") else "darwin-x64"
+    return "linux-arm64" if machine in ("arm64", "aarch64") else "linux-x64"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--node-version", default=DEFAULT_NODE_VERSION)
-    parser.add_argument("--npm-version", default=DEFAULT_NPM_VERSION)
-    parser.add_argument("--platform", choices=list(PLATFORMS.keys()), default=None)
-    parser.add_argument("--skip-npm", action="store_true")
+    parser.add_argument(
+        "--platform",
+        choices=list(PLATFORMS.keys()),
+        default=None,
+        help="Download target platform (default: all)",
+    )
+    parser.add_argument(
+        "--force-npm",
+        action="store_true",
+        help="Re-extract npm from Node official bundle even if already present",
+    )
+    parser.add_argument(
+        "--npm-only",
+        action="store_true",
+        help="Only (re)extract npm, skip Node binary download",
+    )
     args = parser.parse_args()
 
     platforms = [args.platform] if args.platform else list(PLATFORMS.keys())
+    npm_platform = args.platform or _detect_current_platform()
 
     print(f"Node.js version : {args.node_version}")
-    print(f"npm version     : {args.npm_version}")
-    print(f"Platforms       : {', '.join(platforms)}")
-    print(f"Output dir      : {NODE_BIN_DIR}")
+    print(f"Output dir      : {PACKAGE_DIR / '_node_driver'}")
     print()
 
-    for platform_key in platforms:
-        print(f"[{platform_key}]")
-        try:
-            fetch_node_binary(platform_key, args.node_version)
-        except Exception as e:
-            print(f"  ✗ Failed: {e}", file=sys.stderr)
-        print()
+    if args.npm_only:
+        print(f"[npm only via {npm_platform}]")
+        fetch_npm_from_node_archive(npm_platform, args.node_version, force=True)
+    else:
+        for platform_key in platforms:
+            print(f"[{platform_key}]")
+            try:
+                fetch_node_binary(
+                    platform_key,
+                    args.node_version,
+                    extract_npm=(platform_key == npm_platform),
+                    force_npm=args.force_npm and platform_key == npm_platform,
+                )
+            except Exception as e:
+                print(f"  ✗ Failed: {e}", file=sys.stderr)
+                sys.exit(1)
+            print()
 
-    if not args.skip_npm:
-        print("[npm]")
-        try:
-            fetch_npm(args.npm_version)
-        except Exception as e:
-            print(f"  ✗ Failed: {e}", file=sys.stderr)
-        print()
+        if args.force_npm and npm_platform not in platforms:
+            print(f"[npm via {npm_platform}]")
+            fetch_npm_from_node_archive(npm_platform, args.node_version, force=True)
 
-    print("Done. You can now run: python -m build")
+    node_file = NODE_BIN_DIR / PLATFORMS[npm_platform]["output"]
+    if node_file.exists():
+        print("[verify]")
+        verify_bundled_npm(node_file)
+
+    print("\nDone.")
 
 
 if __name__ == "__main__":
