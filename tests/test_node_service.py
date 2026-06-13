@@ -8,7 +8,6 @@
   pytest tests/test_node_service.py -v -s
 """
 
-import sys
 import time
 import uuid
 from pathlib import Path
@@ -16,10 +15,6 @@ from pathlib import Path
 import requests
 
 from midscene_android.node_service import NodeServiceManager
-
-# 确保从项目根导入，而非已安装的包
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from midscene_android import runtime
 from midscene_android.config import MidsceneConfig
 

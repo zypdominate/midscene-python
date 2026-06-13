@@ -129,7 +129,7 @@ def get_current_version() -> str:
     except Exception:
         # 开发模式下 importlib.metadata 可能找不到包，回退到读 __version__
         try:
-            from midscene_android import __version__
+            from src.midscene_android import __version__
             return __version__
         except Exception:
             return "unknown"

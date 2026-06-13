@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
-NODE_BIN_DIR = REPO_ROOT / "midscene_android" / "_node_driver" / "bin"
+NODE_BIN_DIR = REPO_ROOT / "src" / "midscene_android" / "_node_driver" / "bin"
 DIST_DIR = REPO_ROOT / "dist"
 
 # ─── 平台配置 ───

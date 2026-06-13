@@ -13,13 +13,13 @@ MidsceneRPCError - RPC 通信异常
 
 快速开始
 --------
-    from midscene_android import MidsceneAgent, MidsceneConfig
+    from src.midscene_android import MidsceneAgent, MidsceneConfig
 
     config = MidsceneConfig(
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        base_url="https://xxxx.xxx.com/mode/v1",
         api_key="sk-xxxxxx",
-        model_name="qwen-vl-max",
-        model_family="qwen",
+        model_name="xxx-vl-max",
+        model_family="xxx",
     )
 
     agent = MidsceneAgent("emulator-5554", config)

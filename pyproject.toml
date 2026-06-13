@@ -21,6 +21,7 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
+    "pytest>=8.4.2",
     "python-dotenv>=1.2.1",
     "requests>=2.28",
     "setuptools>=82.0.1",
@@ -36,6 +37,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 markers = [
     "device: tests that require a real Android device connected via ADB and a valid AI Key",
 ]
@@ -58,7 +60,7 @@ ignore = []
 known-first-party = ["midscene_android"]
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["midscene_android*"]
 
 [tool.setuptools.package-data]
