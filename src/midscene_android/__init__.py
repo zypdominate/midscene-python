@@ -13,7 +13,7 @@ MidsceneRPCError - RPC 通信异常
 
 快速开始
 --------
-    from src.midscene_android import MidsceneAgent, MidsceneConfig
+    from midscene_android import MidsceneAgent, MidsceneConfig
 
     config = MidsceneConfig(
         base_url="https://xxxx.xxx.com/mode/v1",
