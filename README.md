@@ -69,10 +69,10 @@ pip install midscene-android
 
 ```ini
 # .env
-MIDSCENE_MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-MIDSCENE_MODEL_API_KEY=sk-your-api-key
-MIDSCENE_MODEL_NAME=qwen-vl-max
-MIDSCENE_MODEL_FAMILY=qwen
+MIDSCENE_MODEL_BASE_URL=https://ark.cn-beijing.volces.com/api/v3/
+MIDSCENE_MODEL_API_KEY=ark-your-api-key
+MIDSCENE_MODEL_NAME=doubao-seed-1-6-vision-250815
+MIDSCENE_MODEL_FAMILY=doubao-seed
 ```
 
 ### 2. 编写测试
@@ -132,10 +132,10 @@ agent = MidsceneAgent("emulator-5556")
 
 # 方式二：代码直接传入
 config = MidsceneConfig(
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    api_key="sk-your-api-key",
-    model_name="qwen-vl-max",
-    model_family="qwen",          # 可选，默认 "openai"
+    base_url="https://ark.cn-beijing.volces.com/api/v3/",
+    api_key="ark-your-api-key",
+    model_name="doubao-seed-1-6-vision-250815",
+    model_family="doubao-seed",
 )
 agent = MidsceneAgent("emulator-5556", config)
 ```
@@ -157,7 +157,7 @@ agent = MidsceneAgent("emulator-5556", config)
 | `MIDSCENE_MODEL_BASE_URL` | ✅ | AI API 的 base URL |
 | `MIDSCENE_MODEL_API_KEY` | ✅ | API Key |
 | `MIDSCENE_MODEL_NAME` | ✅ | 模型名称 |
-| `MIDSCENE_MODEL_FAMILY` | ❌ | 模型家族，默认 `openai` |
+| `MIDSCENE_MODEL_FAMILY` | ❌ | 模型家族 |
 
 ---
 
