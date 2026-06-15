@@ -2,7 +2,7 @@
 测试层级 1：Node 服务启动 + RPC ping
 - 不需要 Android 设备
 - 不需要 AI Key（ping 不调用 AI）
-- 需要内置 Node 二进制 + 内置 npm（即 _runtime/ 已填充）
+- 首次运行需联网：自动下载 Node/npm 到 ~/.midscene_android/node_runtime/
 
 运行：
   pytest tests/test_node_service.py -v -s
@@ -14,9 +14,9 @@ from pathlib import Path
 
 import requests
 
-from src.midscene_android.node_service import NodeServiceManager
-from src.midscene_android import runtime
+from src.midscene_android import node_bootstrap, runtime
 from src.midscene_android.config import MidsceneConfig
+from src.midscene_android.node_service import NodeServiceManager
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ def _reset_singleton():
 
 
 class TestNodeBinary:
-    """验证内置 Node 二进制可用，且不依赖系统 node。"""
+    """验证缓存中的 Node 二进制可用，且不依赖系统 node。"""
 
     def test_node_bin_exists(self):
         path = runtime.get_node_bin()
@@ -51,18 +51,19 @@ class TestNodeBinary:
         print(f"\n  Node binary : {path}")
         print(f"  Size        : {path.stat().st_size // 1024 // 1024} MB")
 
-    def test_node_bin_is_bundled_not_system(self):
-        """内置 Node 路径必须在本库 _runtime/bin/ 下，不能是系统 node。"""
+    def test_node_bin_is_cached_not_system(self):
+        """Node 路径必须在 ~/.midscene_android/node_runtime/bin 下。"""
         import shutil
 
-        bundled = runtime.get_node_bin()
-        system_node = shutil.which("node")
+        cached = runtime.get_node_bin()
+        assert cached.parent.resolve() == node_bootstrap.NODE_RUNTIME_BIN.resolve()
 
+        system_node = shutil.which("node")
         if system_node:
-            assert str(bundled) != system_node, (
-                f"Bundled node resolves to system node: {system_node}"
+            assert str(cached.resolve()) != Path(system_node).resolve(), (
+                f"Cached node resolves to system node: {system_node}"
             )
-        print(f"\n  Bundled node : {bundled}")
+        print(f"\n  Cached node  : {cached}")
         print(f"  System node  : {system_node or '(not found - good)'}")
 
     def test_node_bin_executable(self):
@@ -81,7 +82,7 @@ class TestNodeBinary:
         assert version.startswith("v"), f"Unexpected version output: {version}"
 
     def test_node_env_prepends_bundled_dir(self):
-        """make_node_env 必须把内置 Node 目录放在 PATH 最前面。"""
+        """make_node_env 必须把 Node 缓存目录放在 PATH 最前面。"""
         import platform as _platform
 
         from midscene_android.runtime import make_node_env
@@ -92,7 +93,7 @@ class TestNodeBinary:
         first_path = env["PATH"].split(sep)[0]
 
         assert first_path == str(node_bin.parent), (
-            f"Expected bundled node dir first in PATH.\n"
+            f"Expected cached node dir first in PATH.\n"
             f"  Expected : {node_bin.parent}\n"
             f"  Got      : {first_path}"
         )
@@ -112,12 +113,10 @@ class TestNpmInstall:
     def test_ensure_node_service_idempotent(self):
         """多次调用 runtime.ensure_node_service 应该幂等（第二次直接跳过）。"""
         node_bin = runtime.get_node_bin()
-        # 第一次（若已有 flag 直接跳过；若无则真正安装）
         t0 = time.monotonic()
         runtime.ensure_node_service(node_bin)
         elapsed_first = time.monotonic() - t0
 
-        # 第二次必须立即返回（<1s）
         t1 = time.monotonic()
         runtime.ensure_node_service(node_bin)
         elapsed_second = time.monotonic() - t1
@@ -157,7 +156,6 @@ class TestNodeServiceStartup:
         assert mgr.port > 0, "Service port should be > 0"
         print(f"\n  Node service port: {mgr.port}")
 
-        # 发送 ping RPC，验证服务响应
         resp = requests.post(
             f"http://127.0.0.1:{mgr.port}/rpc",
             json={
@@ -195,7 +193,7 @@ class TestNodeServiceStartup:
         mgr = NodeServiceManager(config)
         mgr.ensure_started()
 
-        for i in range(5):
+        for _ in range(5):
             resp = requests.post(
                 f"http://127.0.0.1:{mgr.port}/rpc",
                 json={

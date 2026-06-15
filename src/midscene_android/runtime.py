@@ -7,6 +7,7 @@ import subprocess
 import threading
 from pathlib import Path
 
+from . import node_bootstrap
 from .exceptions import MidsceneSetupError
 
 logger = logging.getLogger(__name__)
@@ -14,12 +15,18 @@ logger = logging.getLogger(__name__)
 # ─── 路径常量 ──────────────────────────────────────────────────────────────────
 
 PACKAGE_DIR = Path(__file__).parent
-NODE_BIN_DIR = PACKAGE_DIR / "_node_driver" / "bin"
-NPM_CLI = PACKAGE_DIR / "_node_driver" / "npm" / "bin" / "npm-cli.js"
 NODE_SERVICE_DIR = PACKAGE_DIR / "_node_driver" / "service"  # package.json + service.js
 
-CACHE_DIR = Path.home() / ".midscene_android"
+CACHE_DIR = node_bootstrap.CACHE_DIR
+NODE_RUNTIME_BIN = node_bootstrap.NODE_RUNTIME_BIN
+NODE_RUNTIME_NPM = node_bootstrap.NODE_RUNTIME_NPM
 NODE_SVC_CACHE = CACHE_DIR / "node_service"  # npm install 目标目录
+NPM_DONE_FLAG = NODE_SVC_CACHE / ".npm_install_done"
+VERSION_FILE = NODE_SVC_CACHE / ".package_version"  # 缓存版本戳，用于失效检测
+
+# 兼容旧引用：Node/npm 现位于用户缓存目录
+NODE_BIN_DIR = NODE_RUNTIME_BIN
+NPM_CLI = node_bootstrap.npm_cli_path(NODE_RUNTIME_NPM)
 NPM_DONE_FLAG = NODE_SVC_CACHE / ".npm_install_done"
 VERSION_FILE = NODE_SVC_CACHE / ".package_version"  # 缓存版本戳，用于失效检测
 
@@ -33,29 +40,10 @@ PACKAGE_JSON_HASH_FILE = NODE_SVC_CACHE / ".package_json.sha256"
 # ─── 平台检测 ──────────────────────────────────────────────────────────────────
 
 def get_node_bin() -> Path:
-    """返回内置 Node 可执行文件的绝对路径。"""
-    system = platform.system().lower()  # windows / darwin / linux
-    machine = platform.machine().lower()  # x86_64 / aarch64 / arm64
+    """返回 Node 可执行文件路径（首次使用自动下载到 ~/.midscene_android/node_runtime/）。"""
+    path = node_bootstrap.ensure_node_runtime()
 
-    arch = "arm64" if machine in ("aarch64", "arm64") else "x64"
-
-    if system == "windows":
-        name = "node-win32-x64.exe"
-    elif system == "darwin":
-        name = f"node-darwin-{arch}"
-    else:
-        name = f"node-linux-{arch}"
-
-    path = NODE_BIN_DIR / name
-    if not path.exists():
-        raise MidsceneSetupError(
-            f"Bundled Node binary not found: {path}\n"
-            f"Run: python tools/fetch_node_binaries.py"
-        )
-
-    if system != "windows":
-        # 确保二进制文件在非 Windows 系统下具有可执行权限
-        # （防止 pip install 或解压 tar 包时丢失 +x 权限）
+    if platform.system().lower() != "windows":
         if not os.access(path, os.X_OK):
             try:
                 path.chmod(0o755)
@@ -67,13 +55,15 @@ def get_node_bin() -> Path:
 
 
 def get_npm_cli() -> Path:
-    """返回内置 npm-cli.js 路径，不存在时给出明确提示。"""
-    if not NPM_CLI.exists():
+    """返回 npm-cli.js 路径（首次使用自动下载）。"""
+    node_bootstrap.ensure_node_runtime()
+    npm_cli = node_bootstrap.get_cached_npm_cli()
+    if not npm_cli.is_file():
         raise MidsceneSetupError(
-            f"Bundled npm-cli.js not found: {NPM_CLI}\n"
-            f"Run: python tools/fetch_node_binaries.py"
+            f"Bundled npm-cli.js not found: {npm_cli}\n"
+            "First use requires network access to nodejs.org."
         )
-    return NPM_CLI
+    return npm_cli
 
 
 # ─── 环境变量构造 ──────────────────────────────────────────────────────────────
@@ -163,8 +153,8 @@ def is_bundled_source_newer_than_cache() -> bool:
         dst = NODE_SVC_CACHE / name
         if not src.is_file():
             raise MidsceneSetupError(
-                f"Missing bundled Node service source: {src}\n"
-                f"Run: python tools/fetch_node_binaries.py"
+                f"Missing Node service source: {src}\n"
+                "Reinstall midscene-android from PyPI."
             )
         if not dst.is_file():
             return True
@@ -281,7 +271,7 @@ def ensure_node_service(node_bin: Path) -> None:
         "This may take a few minutes (requires npm registry access).",
     )
 
-    # 内置 Node + 内置 npm（_node_driver/npm），PATH 置顶确保不走系统 node/npm
+    # 缓存 Node + npm（~/.midscene_android/node_runtime/），PATH 置顶确保不走系统 node/npm
     npm_cli = get_npm_cli()
     cmd = [str(node_bin), str(npm_cli), "install", "--omit=dev"]
     env = make_node_env(node_bin)

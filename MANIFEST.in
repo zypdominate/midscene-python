@@ -1,10 +1,8 @@
-# sdist 排除 Node 二进制（平台相关大文件，由各平台 wheel 单独携带）
-exclude midscene_android/_node_driver/bin/node-*
-exclude midscene_android/_node_driver/npm/
+# sdist：仅包含 service 源码，排除 Node/npm 大文件
+graft src/midscene_android/_node_driver/service
+prune src/midscene_android/_node_driver/bin
+prune src/midscene_android/_node_driver/npm
+global-exclude node-*
 
-# 包含必要的源码文件
-include midscene_android/_node_driver/service/*.js
-include midscene_android/_node_driver/service/*.json
 include README.md
-include LICENSE
 include pyproject.toml

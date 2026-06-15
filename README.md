@@ -328,16 +328,15 @@ cd midscene_python
 # 安装开发依赖
 pip install -e ".[dev]"
 
-# 下载内置 Node 二进制（仅当前平台）
-python tools/fetch_node_binaries.py --platform win32-x64   # Windows
-python tools/fetch_node_binaries.py --platform linux-x64   # Linux
-python tools/fetch_node_binaries.py --platform darwin-arm64  # macOS Apple Silicon
+# 首次运行测试会自动下载 Node 到 ~/.midscene_android/node_runtime/
+# 可选：预下载到 src/ 目录（纯离线 git 开发）
+python tools/fetch_node_binaries.py --platform win32-x64
 ```
 
 ### 运行测试
 
 ```bash
-# 集成测试（无需 Android 设备）
+# 集成测试（无需 Android 设备；首次需联网）
 pytest tests/ -m "not device" -v
 
 # 需要真实 Android 设备的测试（需配置好 .env 并连接设备）
@@ -347,50 +346,45 @@ pytest tests/ -m device -v -s
 ### 构建发行包
 
 ```bash
-# 构建当前平台的 wheel + sdist
-python tools/build_platform_wheel.py
+python tools/build_wheel.py --clean
 
-# 构建指定平台 wheel
-python tools/build_platform_wheel.py --platform linux-x64
-
-# 构建全部 5 个平台 wheel + sdist（需要先下载所有 Node 二进制）
-python tools/build_platform_wheel.py --all
-
-# dist/ 目录结果示例：
-# midscene_android-0.2.0.tar.gz                               ← 源码包
-# midscene_android-0.2.0-py3-none-win_amd64.whl               ← Windows
-# midscene_android-0.2.0-py3-none-manylinux_2_17_x86_64.whl  ← Linux x64
-# midscene_android-0.2.0-py3-none-manylinux_2_17_aarch64.whl ← Linux ARM
-# midscene_android-0.2.0-py3-none-macosx_10_14_x86_64.whl    ← macOS Intel
-# midscene_android-0.2.0-py3-none-macosx_11_0_arm64.whl      ← macOS Apple Silicon
+# dist/ 示例：
+# midscene_android-0.0.3-py3-none-any.whl
+# midscene_android-0.0.3.tar.gz
 ```
+
+上传 PyPI 见 [RELEASE_GUIDE.md](RELEASE_GUIDE.md)。
 
 ### 项目结构
 
 ```
-midscene_android/
-├── __init__.py          # 公开 API 入口
-├── config.py            # MidsceneConfig（环境变量 / .env 支持）
-├── midscene_agent.py    # MidsceneAgent（所有 AI 操作方法）
-├── node_service.py      # NodeServiceManager（进程级单例）
-├── runtime.py           # Node 二进制管理、npm install、版本缓存
-├── exceptions.py        # 异常类
+src/midscene_android/
+├── __init__.py
+├── config.py
+├── midscene_agent.py
+├── node_bootstrap.py    # 首次运行从 nodejs.org 下载 Node/npm
+├── node_service.py
+├── runtime.py
+├── exceptions.py
 └── _node_driver/
-    ├── bin/             # 各平台 Node 二进制（5 平台，wheel 打包时按平台选一）
-    ├── npm/             # 内置 npm（用于首次 npm install，无需系统 npm）
-    └── service/
-        ├── service.js   # Node.js RPC 服务（JSON-RPC 2.0）
-        └── package.json # @midscene/android 依赖声明
+    └── service/         # 随 pip 包分发（package.json + service.js）
+        ├── service.js
+        └── package.json
+
+# 运行时缓存（不在 pip 包内）：
+# ~/.midscene_android/node_runtime/   ← Node + npm
+# ~/.midscene_android/node_service/   ← npm install @midscene/android
 
 tests/
-├── conftest.py                 # 共享 fixture（dummy_config、singleton 清理、device marker）
-├── test_node_service.py        # Node 二进制与服务启动测试
-├── test_agent_integration.py   # 集成测试（Level 1/2 无需设备，Level 3 需要设备）
-└── test_example_integration.py # 示例集成测试
+├── conftest.py
+├── test_node_service.py
+├── test_agent_integration.py
+└── test_example_integration.py
 
 tools/
-├── fetch_node_binaries.py      # 下载 Node 二进制（开发时使用）
-└── build_platform_wheel.py     # 构建平台差异化 wheel
+├── fetch_node_binaries.py   # 可选：预填 src/_node_driver（开发用）
+├── build_wheel.py           # 构建 py3-none-any wheel + sdist
+└── upload_pypi.py           # 检查 dist/ 并上传 PyPI
 ```
 
 ---

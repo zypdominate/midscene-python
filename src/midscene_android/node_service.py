@@ -5,8 +5,9 @@ Node.js 服务
 1. 以进程级单例模式启动/维护 Node.js 微服务
 2. Python 进程退出时通过 atexit 自动关闭 Node 子进程
 
-首次使用时，用内置 Node 二进制 + 内置 npm 执行 npm install
-   （缓存到 ~/.midscene_android/node_service/）
+首次使用时，用缓存 Node 二进制 + 缓存 npm 执行 npm install
+   （Node/npm 首次自动下载到 ~/.midscene_android/node_runtime/；
+    @midscene/android 安装到 ~/.midscene_android/node_service/）
 
 核心原则：
   所有 Node 相关子进程（npm install、Node 微服务本身）都必须使用内置的 Node 二进制，不依赖系统 PATH 中的 node。
