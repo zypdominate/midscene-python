@@ -28,10 +28,10 @@ import uuid
 import pytest
 import requests
 
-from src.midscene_android import runtime, MidsceneNodeServiceError
-from src.midscene_android.config import MidsceneConfig
-from src.midscene_android.midscene_agent import MidsceneAgent
-from src.midscene_android.node_service import NodeServiceManager
+from midscene_android import runtime, MidsceneNodeServiceError
+from midscene_android.config import MidsceneConfig
+from midscene_android.midscene_agent import MidsceneAgent
+from midscene_android.node_service import NodeServiceManager
 
 # ─── 标记定义 ─────────────────────────────────────────────────────────────────
 

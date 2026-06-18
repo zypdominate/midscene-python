@@ -6,7 +6,7 @@
 
 import pytest
 
-from src.midscene_android import MidsceneAgent
+from midscene_android import MidsceneAgent
 
 
 # ─────────────────────────────────────────────────────────────────────────────

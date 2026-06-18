@@ -14,9 +14,9 @@ from pathlib import Path
 
 import requests
 
-from src.midscene_android import node_bootstrap, runtime
-from src.midscene_android.config import MidsceneConfig
-from src.midscene_android.node_service import NodeServiceManager
+from midscene_android import node_bootstrap, runtime
+from midscene_android.config import MidsceneConfig
+from midscene_android.node_service import NodeServiceManager
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
