@@ -6,6 +6,48 @@
 
 ---
 
+## 运行时 Node Bootstrap 设计
+
+解释“为什么发布流程与普通 Python 包不同”。
+
+### 1) 背景与约束
+
+- PyPI 单文件默认上限为 **100 MB**
+- Node 可执行文件（单平台约 80MB）+ npm 会导致 wheel/sdist 超限
+- 因此改为：**包内仅放 Python 代码 + Node service 源码**，Node/npm 在运行时首次下载
+
+### 2) 当前运行时架构
+
+- pip 包内仅保留：
+  - `src/midscene_android/_node_driver/service/package.json`
+  - `src/midscene_android/_node_driver/service/service.js`
+- 首次运行自动准备：
+  - `~/.midscene_android/node_runtime/`：Node + npm
+  - `~/.midscene_android/node_service/`：`npm install @midscene/android` 的缓存结果
+
+### 3) 启动链路
+
+1. `pip install midscene-android`
+2. 首次调用 `MidsceneAgent` / `ensure_node_service()`
+3. `node_bootstrap.ensure_node_runtime()`：
+   - 若缓存存在：直接复用
+   - 若本地开发目录已预填 `_node_driver`：优先 seed 到缓存
+   - 否则从 nodejs.org 下载并解压
+4. 执行 `npm install --omit=dev`，启动 Node RPC 服务
+
+### 4) 发布与运维影响
+
+- 发布产物固定为：**1 个 `py3-none-any.whl` + 1 个 `sdist`**
+- `tools/upload_pypi.py --require-all` 会校验该组合和 100MB 限制
+- 首次运行要求网络可达：
+  - nodejs.org（下载 Node）
+  - registry.npmjs.org（安装 `@midscene/android` 依赖）
+- 离线场景可预热：
+  - 先在联网环境准备 `~/.midscene_android/node_runtime/` 与 `~/.midscene_android/node_service/`
+  - 或使用 `tools/fetch_node_binaries.py` 预填开发目录，再 seed 到缓存
+
+---
+
 ## 一、准备工作
 
 ### 1. PyPI 账号与 Token
@@ -103,8 +145,11 @@ python tools/upload_pypi.py --require-all --repository testpypi --token pypi-...
 ## 五、发布后验证
 
 ```bash
-python -m venv /tmp/midscene-test
-source /tmp/midscene-test/bin/activate   # Windows: .\midscene-test\Scripts\activate
+python -m venv .venv-release-test
+# Linux/macOS:
+source .venv-release-test/bin/activate
+# Windows:
+# .\.venv-release-test\Scripts\activate
 
 pip install midscene-android
 pytest tests/ -m "not device" -v
@@ -141,8 +186,12 @@ PyPI：https://pypi.org/project/midscene-android/
 
 **Q: 用户离线环境怎么办？**
 
-- 手动预填 `~/.midscene_android/node_runtime/`（结构同运行时下载结果），或在内网镜像 nodejs.org。
+- 手动预填 `~/.midscene_android/node_runtime/` 与 `~/.midscene_android/node_service/`，或在内网镜像 nodejs.org / npm registry。
 
 **Q: 本地 git 开发还要 fetch_node_binaries 吗？**
 
 - 可选。正常运行会通过 `node_bootstrap` 自动下载到缓存；`tools/fetch_node_binaries.py` 仅用于预填 `src/.../_node_driver/` 方便离线开发。
+
+**Q: 首次下载经常中断（IncompleteRead）怎么办？**
+
+- 属于网络稳定性问题，重试即可；若在公司网络，优先配置可访问 nodejs.org / npm registry 的网络策略。
