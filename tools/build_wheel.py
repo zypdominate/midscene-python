@@ -20,11 +20,23 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 DIST_DIR = REPO_ROOT / "dist"
+BUILD_DIR = REPO_ROOT / "build"
 
 
 def _run(cmd: list[str]) -> None:
     print(f"  $ {' '.join(cmd)}")
     subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+
+
+def _cleanup_temp_artifacts() -> None:
+    """删除构建产生的临时目录。"""
+    if BUILD_DIR.exists():
+        shutil.rmtree(BUILD_DIR, ignore_errors=True)
+        print(f"  Cleaned: {BUILD_DIR}")
+
+    for egg_info in REPO_ROOT.glob("*.egg-info"):
+        shutil.rmtree(egg_info, ignore_errors=True)
+        print(f"  Cleaned: {egg_info}")
 
 
 def main() -> None:
@@ -44,11 +56,14 @@ def main() -> None:
         print("Installing build...")
         subprocess.run([sys.executable, "-m", "pip", "install", "build"], check=True)
 
-    if not args.sdist_only:
-        _run([sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST_DIR)])
+    try:
+        if not args.sdist_only:
+            _run([sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST_DIR)])
 
-    if not args.wheel_only:
-        _run([sys.executable, "-m", "build", "--sdist", "--outdir", str(DIST_DIR)])
+        if not args.wheel_only:
+            _run([sys.executable, "-m", "build", "--sdist", "--outdir", str(DIST_DIR)])
+    finally:
+        _cleanup_temp_artifacts()
 
     print(f"\n{'=' * 60}")
     print(f"  Build Summary  →  {DIST_DIR}")
