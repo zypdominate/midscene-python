@@ -360,16 +360,16 @@ python tools/build_wheel.py --clean
 ```
 src/midscene_android/
 ├── __init__.py
-├── config.py
-├── midscene_agent.py
+├── config.py            # MidsceneConfig（环境变量 / .env 支持）
+├── midscene_agent.py    # MidsceneAgent（所有 AI 操作方法）
 ├── node_bootstrap.py    # 首次运行从 nodejs.org 下载 Node/npm
-├── node_service.py
-├── runtime.py
+├── node_service.py      # NodeServiceManager（进程级单例）
+├── runtime.py           # Node 二进制管理、npm install、版本缓存
 ├── exceptions.py
 └── _node_driver/
     └── service/         # 随 pip 包分发（package.json + service.js）
-        ├── service.js
-        └── package.json
+        ├── service.js   # Node.js RPC 服务（JSON-RPC 2.0）
+        └── package.json # @midscene/android 依赖声明
 
 # 运行时缓存（不在 pip 包内）：
 # ~/.midscene_android/node_runtime/   ← Node + npm
@@ -377,9 +377,9 @@ src/midscene_android/
 
 tests/
 ├── conftest.py
-├── test_node_service.py
-├── test_agent_integration.py
-└── test_example_integration.py
+├── test_node_service.py        # Node 二进制与服务启动测试
+├── test_agent_integration.py   # 集成测试（Level 1/2 无需设备，Level 3 需要设备）
+└── test_example_integration.py # 示例集成测试
 
 tools/
 ├── fetch_node_binaries.py   # 可选：预填 src/_node_driver（开发用）
