@@ -20,12 +20,31 @@ const {
 const sessions = new Map();
 let sessionCounter = 0;
 
+let SERVICE_VERSION = 'unknown';
+try {
+    SERVICE_VERSION = require('./package.json').version || 'unknown';
+} catch (_) {
+    // package.json 缺失时回退到 'unknown'
+}
+
 // ====================== Logging ======================
 const LOG_FILE = path.join(process.cwd(), "midscene_service.log");
+const LOG_MAX_BYTES = 5 * 1024 * 1024; // 单个日志文件上限 5MB，超过则轮转一份
+
+function rotateLogIfNeeded() {
+    try {
+        if (fs.statSync(LOG_FILE).size > LOG_MAX_BYTES) {
+            fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);
+        }
+    } catch (_) {
+        // 文件不存在或 stat 失败，忽略
+    }
+}
 
 function log(message) {
     const timestamp = new Date().toLocaleTimeString("en-US", {hour12: false});
     const line = `[${timestamp}] ${message}\n`;
+    rotateLogIfNeeded();
     fs.appendFileSync(LOG_FILE, line, "utf-8");
     console.log(line.trim());
 }
@@ -120,7 +139,7 @@ const handlers = {
             }
             targetDeviceId = devices[0].udid;
             log(`Using targetDeviceId: ${targetDeviceId}`);
-            log(`Using devices: ${devices}`);
+            log(`Using devices: ${JSON.stringify(devices)}`);
         }
 
         log(`Creating session for device: ${targetDeviceId}`);
@@ -363,7 +382,7 @@ const handlers = {
         return {
             pong: true,
             pid: process.pid,
-            version: "0.1.0",
+            version: SERVICE_VERSION,
             activeSessions: sessions.size
         };
     },

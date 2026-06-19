@@ -86,7 +86,32 @@ class NodeServiceManager:
             self._start()
 
     def rpc(self, method: str, timeout: int = 10, **params: Any) -> dict[str, Any]:
-        """通用 RPC 调用方法。"""
+        """通用 RPC 调用方法。
+
+        - JSON-RPC 业务错误包装为 ``MidsceneRPCError``。
+        - 传输层错误包装为 ``MidsceneNodeServiceError``，不再裸泄露 requests 异常。
+        - Node 进程崩溃（连接被拒）时自动重启一次并重试。注意：重启后旧
+          session 已失效，对有状态调用会得到清晰的 "Session not found" 业务错误。
+        """
+        try:
+            return self._do_rpc(method, timeout, **params)
+        except requests.ConnectionError as exc:
+            if self._is_running():
+                msg = f"Failed to reach Node service for method {method!r}: {exc}"
+                raise MidsceneNodeServiceError(msg) from exc
+            warn_msg = f"Node service appears down during {method!r}; restarting and retrying once."
+            runtime.logger.warning(warn_msg, method, )
+            self.ensure_started()
+            try:
+                return self._do_rpc(method, timeout, **params)
+            except requests.RequestException as exc2:
+                msg = f"Node service unavailable after restart for method {method!r}: {exc2}"
+                raise MidsceneNodeServiceError(msg) from exc2
+        except requests.RequestException as exc:
+            msg = f"RPC transport error for method {method!r}: {exc}"
+            raise MidsceneNodeServiceError(msg) from exc
+
+    def _do_rpc(self, method: str, timeout: int, **params: Any) -> dict[str, Any]:
         resp = requests.post(
             f"http://127.0.0.1:{self.port}/rpc",
             json={
@@ -149,6 +174,8 @@ class NodeServiceManager:
         )
 
         self._port = self._wait_ready()
+        # service.js 的 console.log 会持续写 stdout；必须 drain，否则管道写满会阻塞 Node。
+        threading.Thread(target=self._drain_stdout, daemon=True).start()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
         runtime.logger.info(
             "Midscene Node service ready  port=%d  pid=%d  node=%s",
@@ -183,11 +210,28 @@ class NodeServiceManager:
             f"Midscene Node service did not become ready within {timeout}s"
         )
 
+    def _drain_stdout(self) -> None:
+        """持续消费 stdout，防止管道满阻塞子进程（_wait_ready 之后 service.js 仍会写 stdout）。"""
+        proc = self._proc
+        if not proc or not proc.stdout:
+            return
+        try:
+            for line in proc.stdout:
+                runtime.logger.debug("[node] %s", line.rstrip())
+        except (ValueError, OSError):
+            # 进程关闭后管道被关闭，迭代可能抛错，忽略即可。
+            pass
+
     def _drain_stderr(self) -> None:
         """持续消费 stderr，防止管道满阻塞子进程。"""
-        assert self._proc and self._proc.stderr
-        for line in self._proc.stderr:
-            runtime.logger.debug("[node stderr] %s", line.rstrip())
+        proc = self._proc
+        if not proc or not proc.stderr:
+            return
+        try:
+            for line in proc.stderr:
+                runtime.logger.debug("[node stderr] %s", line.rstrip())
+        except (ValueError, OSError):
+            pass
 
     def _shutdown(self) -> None:
         if self._proc and self._proc.poll() is None:
