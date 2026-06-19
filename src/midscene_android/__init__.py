@@ -30,6 +30,7 @@ MidsceneRPCError - RPC 通信异常
 
 from .config import MidsceneConfig
 from .exceptions import (
+    MidsceneConfigError,
     MidsceneError,
     MidsceneNodeServiceError,
     MidsceneRPCError,
@@ -40,6 +41,7 @@ from .midscene_agent import MidsceneAgent
 __all__ = [
     "MidsceneAgent",
     "MidsceneConfig",
+    "MidsceneConfigError",
     "MidsceneError",
     "MidsceneNodeServiceError",
     "MidsceneRPCError",

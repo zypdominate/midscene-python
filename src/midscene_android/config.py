@@ -6,6 +6,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+from .exceptions import MidsceneConfigError
+
 # 模块加载时执行一次，override=False 保留进程中已有的环境变量
 load_dotenv(override=False)
 
@@ -39,7 +41,7 @@ class MidsceneConfig:
             if not value
         ]
         if missing:
-            raise OSError(
+            raise MidsceneConfigError(
                 "Missing required environment variables for MidsceneConfig: "
                 + ", ".join(missing)
             )

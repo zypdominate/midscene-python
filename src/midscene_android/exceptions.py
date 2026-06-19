@@ -13,6 +13,10 @@ class MidsceneSetupError(MidsceneError):
     """初始化失败（如 Node 二进制缺失、npm install 失败）。"""
 
 
+class MidsceneConfigError(MidsceneSetupError):
+    """配置缺失或无效（如必填环境变量未设置）。"""
+
+
 class MidsceneRPCError(MidsceneError):
     """Node.js 侧返回的业务错误（RPC level error）。"""
 
