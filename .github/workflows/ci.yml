@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - name: ruff check
+        run: ruff check .
+
+  type-check:
+    name: Type check (mypy, informational)
+    runs-on: ubuntu-latest
+    # 代码库尚未完全标注类型，mypy 暂作信息提示，不作为合并门槛。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install mypy types-requests
+      - run: mypy
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    env:
+      # 非 device 测试只需启动 Node 服务，不会发起真实 AI 调用，这里用占位配置。
+      MIDSCENE_MODEL_BASE_URL: https://example.com/v1
+      MIDSCENE_MODEL_API_KEY: ci-dummy-key
+      MIDSCENE_MODEL_NAME: ci-dummy-model
+      MIDSCENE_MODEL_FAMILY: openai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Cache Node runtime & service
+        uses: actions/cache@v4
+        with:
+          path: ~/.midscene_android
+          key: midscene-${{ runner.os }}-node22-${{ hashFiles('src/midscene_android/_node_driver/service/package.json') }}
+          restore-keys: |
+            midscene-${{ runner.os }}-node22-
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Run tests (no device)
+        run: pytest tests/ -m "not device" -v
+
+  build:
+    name: Build & check distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
