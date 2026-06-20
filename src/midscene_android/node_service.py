@@ -27,7 +27,6 @@ from . import runtime
 from .config import MidsceneConfig
 from .exceptions import MidsceneNodeServiceError, MidsceneRPCError
 
-
 # ─── 进程级单例 ────────────────────────────────────────────────────────────────
 
 class NodeServiceManager:
@@ -99,8 +98,11 @@ class NodeServiceManager:
             if self._is_running():
                 msg = f"Failed to reach Node service for method {method!r}: {exc}"
                 raise MidsceneNodeServiceError(msg) from exc
-            warn_msg = f"Node service appears down during {method!r}; restarting and retrying once."
-            runtime.logger.warning(warn_msg, method, )
+            warn_msg = (
+                f"Node service appears down during {method!r}; "
+                "restarting and retrying once."
+            )
+            runtime.logger.warning(warn_msg)
             self.ensure_started()
             try:
                 return self._do_rpc(method, timeout, **params)

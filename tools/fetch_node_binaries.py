@@ -134,7 +134,7 @@ def main() -> None:
     if node_file.exists():
         print("[verify]")
         verify_npm(node_file, DEV_NPM_DIR)
-        print(f"  ✓ npm verification OK")
+        print("  ✓ npm verification OK")
 
     print("\nDone.")
 

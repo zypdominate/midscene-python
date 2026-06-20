@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import logging
 import os
@@ -324,9 +326,11 @@ def run_subprocess(
 
     try:
         proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         proc.kill()
-        raise MidsceneSetupError(f"{error_prefix}: timed out after {timeout}s")
+        raise MidsceneSetupError(
+            f"{error_prefix}: timed out after {timeout}s"
+        ) from exc
 
     t.join(timeout=5)
 
