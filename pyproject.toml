@@ -8,11 +8,14 @@ version = "0.0.3"
 description = "AI-powered Android automation via Midscene.js, bridged into Python"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
+authors = [{ name = "zypdominate" }]
 keywords = ["android", "automation", "testing", "ai", "midscene"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -27,6 +30,12 @@ dependencies = [
     "setuptools>=82.0.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/zypdominate/midscene-python"
+Repository = "https://github.com/zypdominate/midscene-python"
+Issues = "https://github.com/zypdominate/midscene-python/issues"
+Changelog = "https://github.com/zypdominate/midscene-python/blob/master/CHANGELOG.md"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
@@ -34,6 +43,7 @@ dev = [
     "build",
     "twine",
     "ruff",
+    "mypy",
 ]
 
 [tool.pytest.ini_options]
@@ -54,7 +64,8 @@ select = [
     "UP",  # pyupgrade
     "B",   # flake8-bugbear
 ]
-ignore = []
+# E501（行过长）主要由中文注释/文档字符串触发，代码宽度交由 ruff format 处理。
+ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["midscene_android"]
@@ -66,6 +77,7 @@ exclude = ["midscene_android._node_driver*"]
 
 [tool.setuptools.package-data]
 midscene_android = [
+    "py.typed",
     "_node_driver/service/package.json",
     "_node_driver/service/service.js",
 ]
@@ -75,3 +87,11 @@ midscene_android = [
     "_node_driver/bin/*",
     "_node_driver/npm/**",
 ]
+
+[tool.mypy]
+python_version = "3.9"
+files = ["src/midscene_android"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true

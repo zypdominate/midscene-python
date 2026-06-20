@@ -1,5 +1,10 @@
 # midscene-android
 
+[![PyPI version](https://img.shields.io/pypi/v/midscene-android.svg)](https://pypi.org/project/midscene-android/)
+[![Python](https://img.shields.io/pypi/pyversions/midscene-android.svg)](https://pypi.org/project/midscene-android/)
+[![CI](https://github.com/zypdominate/midscene-python/actions/workflows/ci.yml/badge.svg)](https://github.com/zypdominate/midscene-python/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 将 [Midscene.js](https://github.com/web-infra-dev/midscene) AI 驱动的 Android 自动化能力桥接到 Python 测试框架。
 
 无需自行安装 Node.js；无需维护 UI 选择器——用自然语言描述操作，AI 负责定位和执行。
