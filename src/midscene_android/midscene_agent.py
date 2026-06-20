@@ -25,7 +25,7 @@ class MidsceneAgent:
         self._node_manager = NodeServiceManager(self._config)
         self._node_manager.ensure_started()
 
-        create_params = {}
+        create_params: dict[str, Any] = {}
         if device_id:
             create_params["deviceId"] = device_id
         if self._config.ai_action_context:
@@ -45,7 +45,7 @@ class MidsceneAgent:
 
     # ── Internal RPC ─────────────────────────────────────────────────────────────
 
-    def _rpc(self, method: str, timeout: int = _TIMEOUT, **params: Any) -> dict[str, Any]:
+    def _rpc(self, method: str, *, timeout: int = _TIMEOUT, **params: Any) -> dict[str, Any]:
         if self._closed:
             raise MidsceneError("Agent has been destroyed; create a new MidsceneAgent instance")
 

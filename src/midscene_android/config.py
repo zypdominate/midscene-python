@@ -51,7 +51,12 @@ class MidsceneConfig:
         return cls()
 
     def to_node_env(self) -> dict[str, str]:
-        env = {
+        # __post_init__ 已校验必填项，此处收窄 Optional 以满足 dict[str, str]。
+        assert self.base_url is not None
+        assert self.api_key is not None
+        assert self.model_name is not None
+        assert self.model_family is not None
+        env: dict[str, str] = {
             "MIDSCENE_MODEL_BASE_URL": self.base_url,
             "MIDSCENE_MODEL_API_KEY": self.api_key,
             "MIDSCENE_MODEL_NAME": self.model_name,

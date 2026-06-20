@@ -22,13 +22,15 @@
   pytest tests/test_agent_integration.py -v -s -m device
 """
 
+from __future__ import annotations
+
 import threading
 import uuid
 
 import pytest
 import requests
 
-from midscene_android import runtime, MidsceneNodeServiceError
+from midscene_android import MidsceneNodeServiceError, runtime
 from midscene_android.config import MidsceneConfig
 from midscene_android.midscene_agent import MidsceneAgent
 from midscene_android.node_service import NodeServiceManager

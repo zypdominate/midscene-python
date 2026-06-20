@@ -41,6 +41,7 @@ class NodeServiceManager:
 
     _instance: Optional["NodeServiceManager"] = None
     _lock = threading.Lock()
+    _initialized: bool
 
     def __new__(cls, config: MidsceneConfig):
         with cls._lock:
