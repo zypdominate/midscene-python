@@ -16,6 +16,7 @@
 - [架构](#架构)
 - [安装](#安装)
 - [快速开始](#快速开始)
+- [pytest 插件](#pytest-插件)
 - [配置](#配置)
 - [API 参考](#api-参考)
 - [异常处理](#异常处理)
@@ -120,6 +121,66 @@ def test_login(agent: MidsceneAgent):
     agent.ai_tap("登录")
     agent.ai_assert("登录成功，显示用户名 testuser")
 ```
+
+---
+
+## pytest 插件
+
+安装 `midscene-android` 后，pytest 会**自动加载**内置插件，无需额外配置。
+
+### 内置 fixture：`midscene_agent`
+
+无需在 `conftest.py` 中自行声明 fixture，直接在测试函数参数中使用即可：
+
+```python
+# test_my_app.py
+import pytest
+
+@pytest.mark.device
+def test_login(midscene_agent):
+    midscene_agent.ai_action("点击登录按钮")
+    midscene_agent.ai_input("用户名", "testuser")
+    midscene_agent.ai_input("密码", "Test@123456")
+    midscene_agent.ai_assert("登录成功，显示用户首页")
+```
+
+设备 ID 解析顺序：
+
+| 优先级 | 来源 |
+|--------|------|
+| 1 | `--midscene-device` CLI 参数 |
+| 2 | `MIDSCENE_DEVICE_ID` 环境变量 |
+| 3 | `ANDROID_DEVICE_ID` 环境变量 |
+| 4 | 自动选取第一台已连接设备 |
+
+### 失败自动截图与报告
+
+使用 `midscene_agent` 的测试用例失败时，插件会自动：
+
+1. 调用 `get_screenshot()` 将当前屏幕保存为 PNG。
+2. 调用 `get_report_file()` 获取 Midscene HTML 报告路径。
+3. 将上述路径附加到 pytest 报告的 sections（终端 `-v` 输出和 pytest-html 均可见）。
+
+截图保存路径示例：
+
+```
+midscene_artifacts/tests__test_login__test_login.png
+```
+
+### CLI 选项
+
+```bash
+# 指定设备
+pytest --midscene-device emulator-5556 tests/ -m device
+
+# 自定义截图保存目录
+pytest --midscene-artifact-dir /tmp/ci_artifacts tests/ -m device
+```
+
+| 选项 | 默认值 | 说明 |
+|------|--------|------|
+| `--midscene-device` | 自动检测 | Android 设备 ID |
+| `--midscene-artifact-dir` | `midscene_artifacts/` | 失败截图与报告的保存目录 |
 
 ---
 

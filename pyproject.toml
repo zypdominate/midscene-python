@@ -36,6 +36,9 @@ Repository = "https://github.com/zypdominate/midscene-python"
 Issues = "https://github.com/zypdominate/midscene-python/issues"
 Changelog = "https://github.com/zypdominate/midscene-python/blob/master/CHANGELOG.md"
 
+[project.entry-points."pytest11"]
+midscene-android = "midscene_android._pytest_plugin"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
