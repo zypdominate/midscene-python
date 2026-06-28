@@ -84,7 +84,7 @@ pip install midscene
 
 ### 1. 配置 AI 模型
 
-推荐使用 `.env` 文件（自动加载，无需 `export`）：
+推荐使用 `.env` 文件（存放项目根目录，自动加载，无需 `export`）：
 
 ```ini
 # .env

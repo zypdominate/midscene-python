@@ -5,12 +5,24 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from .exceptions import MidsceneConfigError
 
-# 模块加载时执行一次，override=False 保留进程中已有的环境变量
-load_dotenv(override=False)
+
+def _load_env_file() -> None:
+    """从当前工作目录向上查找 `.env` 并加载（不覆盖进程中已有的环境变量）。
+
+    必须使用 ``find_dotenv(usecwd=True)``：裸 ``load_dotenv()`` 默认从
+    ``site-packages/midscene/`` 向上找，业务工程根目录的 ``.env`` 会找不到。
+    """
+    dotenv_path = find_dotenv(usecwd=True)
+    if dotenv_path:
+        load_dotenv(dotenv_path, override=False)
+
+
+# 模块首次导入时尝试加载一次；创建配置时会再次按当前 cwd 查找。
+_load_env_file()
 
 
 @dataclass
@@ -26,6 +38,8 @@ class MidsceneConfig:
     ai_action_context: str | None = None
 
     def __post_init__(self) -> None:
+        _load_env_file()
+
         self.base_url = self.base_url or os.environ.get("MIDSCENE_MODEL_BASE_URL")
         self.api_key = self.api_key or os.environ.get("MIDSCENE_MODEL_API_KEY")
         self.model_name = self.model_name or os.environ.get("MIDSCENE_MODEL_NAME")
@@ -45,6 +59,10 @@ class MidsceneConfig:
             raise MidsceneConfigError(
                 "Missing required environment variables for MidsceneConfig: "
                 + ", ".join(missing)
+                + f". cwd={os.getcwd()!r}. "
+                  "Place a `.env` file in your project root (pytest/PyCharm working directory) "
+                  "or export these variables. "
+                  "See https://github.com/zypdominate/midscene-python#配置"
             )
 
     @classmethod
