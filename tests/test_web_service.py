@@ -26,16 +26,6 @@ from midscene.node_service import NodeServiceManager
 web_mark = pytest.mark.web
 
 
-def _make_dummy_config() -> MidsceneConfig:
-    """Node 服务本身启动不需要真实 AI Key，用占位值即可。"""
-    return MidsceneConfig(
-        base_url="https://placeholder.example.com/v1",
-        api_key="dummy-key-for-web-service-test",
-        model_name="placeholder-model",
-        model_family="openai",
-    )
-
-
 def _get_service(config: MidsceneConfig) -> NodeServiceManager:
     return NodeServiceManager.get(WEB_SERVICE_SPEC, config)
 
@@ -53,8 +43,8 @@ class TestWebNodeServiceStartup:
     def teardown_method(self):
         _reset_service()
 
-    def test_service_starts_and_pings(self):
-        config = _make_dummy_config()
+    def test_service_starts_and_pings(self, fixture_dummy_config):
+        config = fixture_dummy_config
         mgr = _get_service(config)
         mgr.ensure_started()
 
@@ -73,8 +63,8 @@ class TestWebNodeServiceStartup:
         assert data["result"]["pong"] is True
         print(f"\n  web service ping → {data['result']}")
 
-    def test_unknown_method_returns_rpc_error(self):
-        config = _make_dummy_config()
+    def test_unknown_method_returns_rpc_error(self, fixture_dummy_config):
+        config = fixture_dummy_config
         mgr = _get_service(config)
         mgr.ensure_started()
         resp = requests.post(

@@ -15,33 +15,20 @@ from pathlib import Path
 import requests
 
 from midscene import MidsceneConfig, node_bootstrap, runtime
-from midscene.agent_android import ANDROID_SERVICE_SPEC as SPEC
+from midscene.agent_android import ANDROID_SERVICE_SPEC
 from midscene.node_service import NodeServiceManager
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
 def get_node_service(config: MidsceneConfig) -> NodeServiceManager:
-    return NodeServiceManager.get(SPEC, config)
-
-
-def reset_node_service() -> None:
-    NodeServiceManager.reset(SPEC.name)
-
-
-def _make_dummy_config() -> MidsceneConfig:
-    """Node 服务本身启动不需要真实 AI Key，用占位值即可。"""
-    return MidsceneConfig(
-        base_url="https://placeholder.example.com/v1",
-        api_key="dummy-key-for-node-service-test",
-        model_name="placeholder-model",
-        model_family="openai",
-    )
+    return NodeServiceManager.get(ANDROID_SERVICE_SPEC, config)
 
 
 def _reset_singleton():
     """每个测试前重置 Android Node 服务实例，避免状态污染。"""
-    reset_node_service()
+    NodeServiceManager.reset(ANDROID_SERVICE_SPEC.name)
 
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
@@ -90,10 +77,8 @@ class TestNodeBinary:
         """make_node_env 必须把 Node 缓存目录放在 PATH 最前面。"""
         import platform as _platform
 
-        from midscene.runtime import make_node_env
-
         node_bin = runtime.get_node_bin()
-        env = make_node_env(node_bin)
+        env = runtime.make_node_env(node_bin)
         sep = ";" if _platform.system().lower() == "windows" else ":"
         first_path = env["PATH"].split(sep)[0]
 
@@ -109,9 +94,7 @@ class TestNpmInstall:
     """验证 npm install 能正常执行（首次或已有缓存）。"""
 
     def test_npm_cli_exists(self):
-        from midscene.runtime import get_npm_cli
-
-        path = get_npm_cli()
+        path = runtime.get_npm_cli()
         assert path.exists(), f"npm-cli.js not found: {path}"
         print(f"\n  npm-cli.js: {path}")
 
@@ -119,11 +102,11 @@ class TestNpmInstall:
         """多次调用 runtime.ensure_node_service 应该幂等（第二次直接跳过）。"""
         node_bin = runtime.get_node_bin()
         t0 = time.monotonic()
-        runtime.ensure_node_service(SPEC, node_bin)
+        runtime.ensure_node_service(ANDROID_SERVICE_SPEC, node_bin)
         elapsed_first = time.monotonic() - t0
 
         t1 = time.monotonic()
-        runtime.ensure_node_service(SPEC, node_bin)
+        runtime.ensure_node_service(ANDROID_SERVICE_SPEC, node_bin)
         elapsed_second = time.monotonic() - t1
 
         assert elapsed_second < 1.0, (
@@ -135,9 +118,9 @@ class TestNpmInstall:
     def test_node_service_files_exist_after_install(self):
         """npm install 完成后，node_modules/@midscene/android 应存在。"""
         node_bin = runtime.get_node_bin()
-        runtime.ensure_node_service(SPEC, node_bin)
+        runtime.ensure_node_service(ANDROID_SERVICE_SPEC, node_bin)
 
-        midscene_pkg = SPEC.cache_dir / "node_modules" / "@midscene" / "android"
+        midscene_pkg = ANDROID_SERVICE_SPEC.cache_dir / "node_modules" / "@midscene" / "android"
         assert midscene_pkg.exists(), (
             f"@midscene/android not found after npm install: {midscene_pkg}"
         )
@@ -153,9 +136,8 @@ class TestNodeServiceStartup:
     def teardown_method(self):
         _reset_singleton()
 
-    def test_service_starts_and_pings(self):
-        config = _make_dummy_config()
-        mgr = get_node_service(config)
+    def test_service_starts_and_pings(self, fixture_dummy_config):
+        mgr = get_node_service(fixture_dummy_config)
         mgr.ensure_started()
 
         assert mgr.port > 0, "Service port should be > 0"
@@ -177,9 +159,9 @@ class TestNodeServiceStartup:
         assert data["result"]["pong"] is True
         print(f"  ping response: {data['result']}")
 
-    def test_service_singleton(self):
+    def test_service_singleton(self, fixture_dummy_config):
         """同一 Python 进程内两次 ensure_started 应返回同一端口。"""
-        config = _make_dummy_config()
+        config = fixture_dummy_config
         mgr1 = get_node_service(config)
         mgr1.ensure_started()
         port1 = mgr1.port
@@ -192,9 +174,9 @@ class TestNodeServiceStartup:
         assert mgr1 is mgr2, "Should be same instance"
         print(f"\n  Singleton port: {port1}")
 
-    def test_service_survives_multiple_rpc_calls(self):
+    def test_service_survives_multiple_rpc_calls(self, fixture_dummy_config):
         """连续发送多次 ping，服务应保持稳定。"""
-        config = _make_dummy_config()
+        config = fixture_dummy_config
         mgr = get_node_service(config)
         mgr.ensure_started()
 
