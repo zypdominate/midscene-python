@@ -1,7 +1,10 @@
 """
-首次使用时从 nodejs.org 下载 Node 二进制与 npm，缓存到 ~/.midscene_android/node_runtime/。
+首次使用时从 nodejs.org 下载 Node 二进制与 npm，缓存到 ``~/.midscene/node_runtime/``。
 
-PyPI 包不再携带 Node/npm 大文件；pip install 后由 runtime 自动调用本模块。
+该运行时在 android / web 平台包之间共享：所有平台复用同一份 Node/npm，
+仅各自的 ``node_service`` 目录（npm install 目标）按平台分离。
+
+PyPI 包不携带 Node/npm 大文件；pip install 后由 runtime 自动调用本模块。
 """
 
 from __future__ import annotations
@@ -21,11 +24,12 @@ import requests
 
 from .exceptions import MidsceneSetupError
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("midscene.node_bootstrap")
 
 DEFAULT_NODE_VERSION = "22.12.0"
 
-CACHE_DIR = Path.home() / ".midscene_android"
+# 缓存根目录：android / web 共享 node_runtime，各平台 node_service 分目录存放
+CACHE_DIR = Path.home() / ".midscene"
 NODE_RUNTIME_CACHE = CACHE_DIR / "node_runtime"
 NODE_RUNTIME_BIN = NODE_RUNTIME_CACHE / "bin"
 NODE_RUNTIME_NPM = NODE_RUNTIME_CACHE / "npm"
@@ -259,50 +263,13 @@ def _print_banner(*lines: str) -> None:
     sep = "=" * 60
     print(f"\n{sep}", flush=True)
     for line in lines:
-        print(f"[midscene-android] {line}", flush=True)
+        print(f"[midscene] {line}", flush=True)
     print(f"{sep}\n", flush=True)
-
-
-def try_seed_from_dev_bundle() -> bool:
-    """
-    若 git 开发目录已有 _node_driver（fetch_node_binaries 预填），复制到缓存。
-    pip 安装用户无此目录，会直接走 nodejs.org 下载。
-    """
-    if is_node_runtime_ready():
-        return True
-
-    try:
-        from .runtime import PACKAGE_DIR
-    except ImportError:
-        return False
-
-    dev_bin_dir = PACKAGE_DIR / "_node_driver" / "bin"
-    dev_npm_dir = PACKAGE_DIR / "_node_driver" / "npm"
-    platform_key = detect_current_platform()
-    dev_node = node_binary_path(dev_bin_dir, platform_key)
-    dev_npm = npm_cli_path(dev_npm_dir)
-
-    if not dev_node.is_file() or not dev_npm.is_file():
-        return False
-
-    print("[midscene-android] Seeding Node runtime from local _node_driver/ ...", flush=True)
-    NODE_RUNTIME_BIN.mkdir(parents=True, exist_ok=True)
-    dest_node = node_binary_path(NODE_RUNTIME_BIN, platform_key)
-    shutil.copy2(dev_node, dest_node)
-    _chmod_executable(dest_node)
-
-    if NODE_RUNTIME_NPM.exists():
-        shutil.rmtree(NODE_RUNTIME_NPM)
-    shutil.copytree(dev_npm_dir, NODE_RUNTIME_NPM)
-
-    NODE_VERSION_FILE.write_text(get_node_version(), encoding="utf-8")
-    print(f"[midscene-android] Node runtime seeded → {NODE_RUNTIME_CACHE}", flush=True)
-    return True
 
 
 def ensure_node_runtime() -> Path:
     """
-    确保当前平台的 Node + npm 已缓存到 ~/.midscene_android/node_runtime/。
+    确保当前平台的 Node + npm 已缓存到 ``~/.midscene/node_runtime/``。
 
     Returns:
         Node 可执行文件路径。
@@ -313,11 +280,6 @@ def ensure_node_runtime() -> Path:
     if is_node_runtime_ready(version=version, platform_key=platform_key):
         node_bin = node_binary_path(NODE_RUNTIME_BIN, platform_key)
         logger.debug("Node runtime cache hit: %s", node_bin)
-        return node_bin
-
-    if try_seed_from_dev_bundle():
-        node_bin = node_binary_path(NODE_RUNTIME_BIN, platform_key)
-        verify_npm(node_bin, NODE_RUNTIME_NPM)
         return node_bin
 
     _print_banner(
@@ -344,7 +306,7 @@ def ensure_node_runtime() -> Path:
 
     NODE_VERSION_FILE.write_text(version, encoding="utf-8")
     print(
-        f"[midscene-android] Node runtime ready (v{version}, {platform_key}).",
+        f"[midscene] Node runtime ready (v{version}, {platform_key}).",
         flush=True,
     )
     return node_bin

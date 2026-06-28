@@ -1,43 +1,66 @@
-"""MidsceneAgent：Python 侧 Android AI 操作接口。"""
+"""
+BaseAgent：跨平台共享的 AI 操作接口。
+
+android / web 平台包各自继承 :class:`BaseAgent`，复用这里的 RPC 通道与
+全部跨平台 ``ai_*`` 方法，仅需提供：
+
+- 类属性 ``SERVICE_SPEC``（指向各自的 Node 服务）；
+- ``createSession`` 的平台参数（构造时通过 ``create_params`` 传入）；
+- 平台专有方法（Android 的设备操作、Web 的页面导航等）。
+"""
+
+from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, ClassVar
 
 from .config import MidsceneConfig
 from .exceptions import MidsceneError
 from .node_service import NodeServiceManager
+from .runtime import ServiceSpec
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("midscene.agent")
 
-_TIMEOUT = 120
+_DEFAULT_TIMEOUT = 120
 
 
-class MidsceneAgent:
+class BaseAgent:
+    #: 子类必须覆盖：指向该平台的 Node 服务
+    SERVICE_SPEC: ClassVar[ServiceSpec]
+
+    #: RPC 默认超时（秒）
+    DEFAULT_TIMEOUT: ClassVar[int] = _DEFAULT_TIMEOUT
+
     def __init__(
             self,
-            device_id: Optional[str] = None,
-            config: Optional[MidsceneConfig] = None,
-    ):
-        self._device_id = device_id
-        self._session_id: Optional[str] = None
+            config: MidsceneConfig | None = None,
+            *,
+            create_params: dict[str, Any] | None = None,
+    ) -> None:
+        if not hasattr(type(self), "SERVICE_SPEC"):
+            raise NotImplementedError(
+                f"{type(self).__name__} must define a SERVICE_SPEC class attribute"
+            )
         self._closed = False
+        self._session_id: str | None = None
         self._config = config or MidsceneConfig.from_env()
-        self._node_manager = NodeServiceManager(self._config)
+        self._node_manager = NodeServiceManager.get(self.SERVICE_SPEC, self._config)
         self._node_manager.ensure_started()
 
-        create_params: dict[str, Any] = {}
-        if device_id:
-            create_params["deviceId"] = device_id
-        if self._config.ai_action_context:
-            create_params["aiActionContext"] = self._config.ai_action_context
+        params: dict[str, Any] = dict(create_params or {})
+        if self._config.ai_action_context and "aiActionContext" not in params:
+            params["aiActionContext"] = self._config.ai_action_context
 
-        result = self._rpc("createSession", **create_params)
+        result = self._rpc("createSession", **params)
         self._session_id = result["sessionId"]
-        self._device_id = result.get("deviceId") or device_id
+        self._on_session_created(result)
+
+    def _on_session_created(self, result: dict[str, Any]) -> None:
+        """子类钩子：会话创建后保存平台相关信息（如 deviceId）。"""
 
     # ── Context manager ──────────────────────────────────────────────────────────
 
-    def __enter__(self) -> "MidsceneAgent":
+    def __enter__(self):
         return self
 
     def __exit__(self, *_: Any) -> None:
@@ -45,14 +68,18 @@ class MidsceneAgent:
 
     # ── Internal RPC ─────────────────────────────────────────────────────────────
 
-    def _rpc(self, method: str, *, timeout: int = _TIMEOUT, **params: Any) -> dict[str, Any]:
+    def _rpc(self, method: str, *, timeout: int | None = None, **params: Any) -> dict[str, Any]:
         if self._closed:
-            raise MidsceneError("Agent has been destroyed; create a new MidsceneAgent instance")
+            raise MidsceneError("Agent has been destroyed; create a new agent instance")
 
         if self._session_id is not None and method != "createSession":
             params["sessionId"] = self._session_id
 
-        return self._node_manager.rpc(method, timeout=timeout, **params)
+        return self._node_manager.rpc(
+            method,
+            timeout=timeout if timeout is not None else self.DEFAULT_TIMEOUT,
+            **params,
+        )
 
     # ── AI actions ───────────────────────────────────────────────────────────────
 
@@ -70,15 +97,16 @@ class MidsceneAgent:
 
     def ai_scroll(
             self,
-            locate: Optional[str] = None,
+            locate: str | None = None,
             direction: str = "down",
-            scroll_type: Optional[str] = None,
+            scroll_type: str | None = None,
             distance: Any = None,
     ) -> None:
         """
-        真正决定滚动行为的是后端的 Android 实现。
-        当 scroll_type='singleAction' 时，后端忽略 distance 参数，执行固定长度的单次滑动手势，
-        因此 distance=500 与 distance=1000 的效果相同。
+        滚动操作。具体行为由后端平台实现决定。
+
+        当 scroll_type='singleAction' 时，后端通常忽略 distance 参数，
+        执行固定长度的单次滑动手势。
         """
         if isinstance(distance, str):
             distance_map = {"small": 200, "medium": 400, "large": 600}
@@ -102,32 +130,10 @@ class MidsceneAgent:
             distance=distance_value,
         )
 
-    def ai_pinch(
-            self,
-            direction: str,
-            locate: Optional[str] = None,
-            distance: Optional[int] = None,
-            duration: Optional[int] = None,
-    ) -> None:
-        self._rpc(
-            "aiPinch",
-            locate=locate,
-            direction=direction,
-            distance=distance,
-            duration=duration,
-        )
-
-    def ai_long_press(
-            self,
-            locate: str,
-            duration: Optional[int] = None,
-    ) -> None:
-        self._rpc("aiLongPress", locate=locate, duration=duration)
-
     def ai_double_click(self, locate: str) -> None:
         self._rpc("aiDoubleClick", locate=locate)
 
-    def ai_keyboard_press(self, key_name: str, locate: Optional[str] = None) -> None:
+    def ai_keyboard_press(self, key_name: str, locate: str | None = None) -> None:
         self._rpc("aiKeyboardPress", locate=locate, keyName=key_name)
 
     def ai_ask(self, prompt: str) -> Any:
@@ -159,7 +165,7 @@ class MidsceneAgent:
             raise AssertionError(msg)
 
     def ai_wait_for(self, assertion: str, timeout_ms: int = 15000) -> None:
-        rpc_timeout = max(_TIMEOUT, timeout_ms // 1000 + 10)
+        rpc_timeout = max(self.DEFAULT_TIMEOUT, timeout_ms // 1000 + 10)
         self._rpc(
             "aiWaitFor",
             timeout=rpc_timeout,
@@ -167,64 +173,27 @@ class MidsceneAgent:
             timeoutMs=timeout_ms,
         )
 
-    # ── Device & System Actions ──────────────────────────────────────────────────
-
-    def back(self) -> None:
-        """Press the back button."""
-        self._rpc("back")
-
-    def home(self) -> None:
-        """Press the home button."""
-        self._rpc("home")
-
-    def recent_apps(self) -> None:
-        """Open the recent apps screen."""
-        self._rpc("recentApps")
-
-    def launch_app(self, package_name: str) -> None:
-        """Launch an app by its package name."""
-        self._rpc("launchApp", packageName=package_name)
-
-    def terminate_app(self, package_name: str) -> None:
-        """Terminate an app by its package name."""
-        self._rpc("terminateApp", packageName=package_name)
+    # ── Shared helpers ───────────────────────────────────────────────────────────
 
     def get_screenshot(self) -> str:
-        """Get a base64 encoded screenshot of the device."""
+        """获取当前界面的 base64 截图。"""
         return self._rpc("getScreenshot").get("screenshot", "")
 
-    # ── Advanced Automation ──────────────────────────────────────────────────────
-
     def set_ai_act_context(self, ai_action_context: str) -> None:
-        """Set the context for subsequent AI actions."""
+        """设置后续 AI 操作的上下文。"""
         self._rpc("setAIActContext", aiActionContext=ai_action_context)
 
     def run_yaml(self, yaml_content: str) -> Any:
-        """Run a Midscene YAML script."""
+        """运行 Midscene YAML 脚本。"""
         return self._rpc("runYaml", yamlContent=yaml_content).get("result")
 
-    def get_report_file(self) -> Optional[str]:
-        """Get the path to the current agent's report file, if any."""
+    def get_report_file(self) -> str | None:
+        """返回当前 agent 的报告文件路径（如有）。"""
         return self._rpc("getReportFile").get("reportPath")
 
     def get_status(self) -> dict[str, Any]:
-        """Get the current status of the agent session."""
+        """返回当前 agent 会话状态。"""
         return self._rpc("getStatus")
-
-    def run_adb_shell(self, command: str, timeout_ms: Optional[int] = None) -> str:
-        """Run an ADB shell command on the connected device.
-
-        Args:
-            command: The shell command to execute.
-            timeout_ms: Timeout in **milliseconds**. Defaults to None (uses the
-                Node service default). Example: ``timeout_ms=5000`` for 5 seconds.
-
-        Returns:
-            The stdout output of the command as a string.
-        """
-        rpc_timeout = max(_TIMEOUT, timeout_ms // 1000 + 10) if timeout_ms else _TIMEOUT
-        result = self._rpc("runAdbShell", timeout=rpc_timeout, command=command, timeoutMs=timeout_ms)
-        return result.get("output", "")
 
     # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -235,7 +204,7 @@ class MidsceneAgent:
             try:
                 self._rpc("destroySession", sessionId=self._session_id)
             except Exception as e:
-                logger.warning(f"Error destroying session {self._session_id}: {e}")
+                logger.warning("Error destroying session %s: %s", self._session_id, e)
         self._session_id = None
         self._closed = True
 

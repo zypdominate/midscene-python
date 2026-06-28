@@ -1,12 +1,12 @@
 """
-示例：如何将 midscene_android 集成到现有 Python 自动化测试框架。
+示例：如何将 midscene 集成到现有 Python 自动化测试框架。
 
 直接创建 MidsceneAgent，与现有设备封装并行使用。
 """
 
 import pytest
 
-from midscene_android import MidsceneAgent
+from midscene import MidsceneAgent
 
 # ─────────────────────────────────────────────────────────────────────────────
 # conftest.py 示例

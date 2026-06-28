@@ -1,8 +1,9 @@
-"""Midscene 配置。"""
+"""Midscene 配置（被 android / web 平台包共享）。"""
+
+from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -18,11 +19,11 @@ class MidsceneConfig:
 
     最小配置容器，默认从环境变量或 `.env` 读取。"""
 
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    model_name: Optional[str] = None
-    model_family: Optional[str] = None
-    ai_action_context: Optional[str] = None
+    base_url: str | None = None
+    api_key: str | None = None
+    model_name: str | None = None
+    model_family: str | None = None
+    ai_action_context: str | None = None
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url or os.environ.get("MIDSCENE_MODEL_BASE_URL")
@@ -47,7 +48,7 @@ class MidsceneConfig:
             )
 
     @classmethod
-    def from_env(cls) -> "MidsceneConfig":
+    def from_env(cls) -> MidsceneConfig:
         return cls()
 
     def to_node_env(self) -> dict[str, str]:

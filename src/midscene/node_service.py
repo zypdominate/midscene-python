@@ -1,74 +1,94 @@
 """
-Node.js 服务
+Node.js 服务管理（平台无关）
 
 职责：
-1. 以进程级单例模式启动/维护 Node.js 微服务
-2. Python 进程退出时通过 atexit 自动关闭 Node 子进程
+1. 按 :class:`ServiceSpec` 启动/维护 Node.js 微服务，每个 spec（android / web）
+   对应一个独立的 Node 子进程（各自的 node_modules）。
+2. Python 进程退出时通过 atexit 自动关闭 Node 子进程。
 
-首次使用时，用缓存 Node 二进制 + 缓存 npm 执行 npm install
-   （Node/npm 首次自动下载到 ~/.midscene_android/node_runtime/；
-    @midscene/android 安装到 ~/.midscene_android/node_service/）
+首次使用时，用缓存 Node 二进制 + 缓存 npm 在该 spec 的缓存目录执行 npm install
+   （Node/npm 首次自动下载到 ~/.midscene/node_runtime/；
+    @midscene/* 安装到 ~/.midscene/<name>/node_service/）。
 
 核心原则：
-  所有 Node 相关子进程（npm install、Node 微服务本身）都必须使用内置的 Node 二进制，不依赖系统 PATH 中的 node。
-  确保 npm install 期间 npm 内部 fork 的子进程也走内置 Node。
-
+  所有 Node 相关子进程（npm install、Node 微服务本身）都必须使用内置的 Node 二进制，
+  不依赖系统 PATH 中的 node。
 """
+
+from __future__ import annotations
+
 import atexit
 import subprocess
 import threading
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
 from . import runtime
 from .config import MidsceneConfig
 from .exceptions import MidsceneNodeServiceError, MidsceneRPCError
+from .runtime import ServiceSpec
 
-# ─── 进程级单例 ────────────────────────────────────────────────────────────────
 
 class NodeServiceManager:
     """
-    Node.js 微服务的进程级单例。
+    Node.js 微服务管理器，按 :class:`ServiceSpec` 名称键控的进程级注册表。
 
-    - 整个 Python 进程内只启动一个 Node 子进程
-    - 多个 MidsceneAgent 通过 sessionId 共享该进程
-    - Python 退出时由 atexit 自动关闭子进程
-    - 启动 Node 微服务时同样用内置 Node，PATH 置顶保证一致性
+    - 每个 spec（如 android / web）在进程内只启动一个 Node 子进程
+    - 同一 spec 下多个 Agent 通过 sessionId 共享该进程
+    - Python 退出时由 atexit 自动关闭所有子进程
     """
 
-    _instance: Optional["NodeServiceManager"] = None
-    _lock = threading.Lock()
-    _initialized: bool
+    _instances: dict[str, NodeServiceManager] = {}
+    _registry_lock = threading.Lock()
 
-    def __new__(cls, config: MidsceneConfig):
-        with cls._lock:
-            if cls._instance is None:
-                inst = super().__new__(cls)
-                inst._initialized = False
-                cls._instance = inst
-            return cls._instance
+    # ── 注册表接口 ───────────────────────────────────────────────────────────────
 
-    def __init__(self, config: MidsceneConfig) -> None:
-        """Initialize the singleton Node service manager.
+    @classmethod
+    def get(cls, spec: ServiceSpec, config: MidsceneConfig) -> NodeServiceManager:
+        """返回该 spec 对应的管理器（不存在则创建）。
 
-        Note: Only the **first** call's ``config`` takes effect. Subsequent
-        calls with a different config are silently ignored because the Node
-        process (and its environment variables, including API keys) is already
-        running. If you need a different config, restart the Python process.
+        注意：仅 **首个** 调用的 ``config`` 生效。后续不同 config 会被忽略，
+        因为 Node 进程（含 API Key 等环境变量）已在运行。需要更换配置请重启进程。
         """
-        if self._initialized:
-            return
+        with cls._registry_lock:
+            inst = cls._instances.get(spec.name)
+            if inst is None:
+                inst = cls(spec, config)
+                cls._instances[spec.name] = inst
+            return inst
+
+    @classmethod
+    def reset(cls, name: str) -> None:
+        """关闭并移除指定 spec 的管理器（主要用于测试隔离）。"""
+        with cls._registry_lock:
+            inst = cls._instances.get(name)
+        if inst is not None:
+            inst._shutdown()
+
+    @classmethod
+    def reset_all(cls) -> None:
+        """关闭并移除所有管理器。"""
+        with cls._registry_lock:
+            instances = list(cls._instances.values())
+        for inst in instances:
+            inst._shutdown()
+
+    def __init__(self, spec: ServiceSpec, config: MidsceneConfig) -> None:
+        self._spec = spec
         self._config = config
-        self._proc: Optional[subprocess.Popen] = None
-        self._port: Optional[int] = None
+        self._proc: subprocess.Popen | None = None
+        self._port: int | None = None
         self._start_lock = threading.Lock()
-        self._initialized = True
         atexit.register(self._shutdown)
 
     # ── 公开接口 ────────────────────────────────────────────────────────────────
+
+    @property
+    def spec(self) -> ServiceSpec:
+        return self._spec
 
     @property
     def port(self) -> int:
@@ -100,7 +120,7 @@ class NodeServiceManager:
                 msg = f"Failed to reach Node service for method {method!r}: {exc}"
                 raise MidsceneNodeServiceError(msg) from exc
             warn_msg = (
-                f"Node service appears down during {method!r}; "
+                f"Node service ({self._spec.name}) appears down during {method!r}; "
                 "restarting and retrying once."
             )
             runtime.logger.warning(warn_msg)
@@ -136,12 +156,6 @@ class NodeServiceManager:
             )
         return body.get("result", {})
 
-    def get_connected_devices(self) -> list[dict[str, str]]:
-        """获取当前已连接的 Android 设备列表。"""
-        self.ensure_started()
-        result = self.rpc("getConnectedDevices")
-        return result.get("devices", [])
-
     # ── 内部实现 ────────────────────────────────────────────────────────────────
 
     def _is_running(self) -> bool:
@@ -149,9 +163,10 @@ class NodeServiceManager:
 
     def _start(self) -> None:
         node_bin = runtime.get_node_bin()
-        runtime.ensure_node_service(node_bin)
+        runtime.ensure_node_service(self._spec, node_bin)
 
-        service_js = runtime.NODE_SVC_CACHE / "service.js"
+        cache_dir = self._spec.cache_dir
+        service_js = cache_dir / "service.js"
 
         # PATH 置顶 + AI 模型配置 + Node 运行时配置，全部不依赖系统 node
         env = runtime.make_node_env(
@@ -159,14 +174,14 @@ class NodeServiceManager:
             extra={
                 **self._config.to_node_env(),
                 "PORT": "0",  # OS 分配空闲端口，避免冲突
-                "NODE_PATH": str(runtime.NODE_SVC_CACHE / "node_modules"),
+                "NODE_PATH": str(cache_dir / "node_modules"),
             },
         )
 
         runtime.logger.debug("Spawning Node service: %s %s", node_bin.name, service_js)
         self._proc = subprocess.Popen(
             [str(node_bin), str(service_js)],
-            cwd=str(runtime.NODE_SVC_CACHE),
+            cwd=str(cache_dir),
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -181,8 +196,8 @@ class NodeServiceManager:
         threading.Thread(target=self._drain_stdout, daemon=True).start()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
         runtime.logger.info(
-            "Midscene Node service ready  port=%d  pid=%d  node=%s",
-            self._port, self._proc.pid, node_bin.name,
+            "Midscene Node service (%s) ready  port=%d  pid=%d  node=%s",
+            self._spec.name, self._port, self._proc.pid, node_bin.name,
         )
 
     def _wait_ready(self, timeout: float = 30.0) -> int:
@@ -246,4 +261,6 @@ class NodeServiceManager:
                 self._proc.kill()
         self._proc = None
         self._port = None
-        NodeServiceManager._instance = None
+        with NodeServiceManager._registry_lock:
+            if NodeServiceManager._instances.get(self._spec.name) is self:
+                del NodeServiceManager._instances[self._spec.name]

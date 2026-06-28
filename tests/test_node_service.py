@@ -2,7 +2,7 @@
 测试层级 1：Node 服务启动 + RPC ping
 - 不需要 Android 设备
 - 不需要 AI Key（ping 不调用 AI）
-- 首次运行需联网：自动下载 Node/npm 到 ~/.midscene_android/node_runtime/
+- 首次运行需联网：自动下载 Node/npm 到 ~/.midscene/node_runtime/
 
 运行：
   pytest tests/test_node_service.py -v -s
@@ -14,11 +14,19 @@ from pathlib import Path
 
 import requests
 
-from midscene_android import node_bootstrap, runtime
-from midscene_android.config import MidsceneConfig
-from midscene_android.node_service import NodeServiceManager
+from midscene import MidsceneConfig, node_bootstrap, runtime
+from midscene.agent_android import ANDROID_SERVICE_SPEC as SPEC
+from midscene.node_service import NodeServiceManager
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+
+def get_node_service(config: MidsceneConfig) -> NodeServiceManager:
+    return NodeServiceManager.get(SPEC, config)
+
+
+def reset_node_service() -> None:
+    NodeServiceManager.reset(SPEC.name)
 
 
 def _make_dummy_config() -> MidsceneConfig:
@@ -32,11 +40,8 @@ def _make_dummy_config() -> MidsceneConfig:
 
 
 def _reset_singleton():
-    """每个测试前重置单例，避免状态污染。"""
-    mgr = NodeServiceManager._instance
-    if mgr:
-        mgr._shutdown()
-    NodeServiceManager._instance = None
+    """每个测试前重置 Android Node 服务实例，避免状态污染。"""
+    reset_node_service()
 
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
@@ -52,7 +57,7 @@ class TestNodeBinary:
         print(f"  Size        : {path.stat().st_size // 1024 // 1024} MB")
 
     def test_node_bin_is_cached_not_system(self):
-        """Node 路径必须在 ~/.midscene_android/node_runtime/bin 下。"""
+        """Node 路径必须在 ~/.midscene/node_runtime/bin 下。"""
         import shutil
 
         cached = runtime.get_node_bin()
@@ -85,7 +90,7 @@ class TestNodeBinary:
         """make_node_env 必须把 Node 缓存目录放在 PATH 最前面。"""
         import platform as _platform
 
-        from midscene_android.runtime import make_node_env
+        from midscene.runtime import make_node_env
 
         node_bin = runtime.get_node_bin()
         env = make_node_env(node_bin)
@@ -104,7 +109,7 @@ class TestNpmInstall:
     """验证 npm install 能正常执行（首次或已有缓存）。"""
 
     def test_npm_cli_exists(self):
-        from midscene_android.runtime import get_npm_cli
+        from midscene.runtime import get_npm_cli
 
         path = get_npm_cli()
         assert path.exists(), f"npm-cli.js not found: {path}"
@@ -114,11 +119,11 @@ class TestNpmInstall:
         """多次调用 runtime.ensure_node_service 应该幂等（第二次直接跳过）。"""
         node_bin = runtime.get_node_bin()
         t0 = time.monotonic()
-        runtime.ensure_node_service(node_bin)
+        runtime.ensure_node_service(SPEC, node_bin)
         elapsed_first = time.monotonic() - t0
 
         t1 = time.monotonic()
-        runtime.ensure_node_service(node_bin)
+        runtime.ensure_node_service(SPEC, node_bin)
         elapsed_second = time.monotonic() - t1
 
         assert elapsed_second < 1.0, (
@@ -130,9 +135,9 @@ class TestNpmInstall:
     def test_node_service_files_exist_after_install(self):
         """npm install 完成后，node_modules/@midscene/android 应存在。"""
         node_bin = runtime.get_node_bin()
-        runtime.ensure_node_service(node_bin)
+        runtime.ensure_node_service(SPEC, node_bin)
 
-        midscene_pkg = runtime.NODE_SVC_CACHE / "node_modules" / "@midscene" / "android"
+        midscene_pkg = SPEC.cache_dir / "node_modules" / "@midscene" / "android"
         assert midscene_pkg.exists(), (
             f"@midscene/android not found after npm install: {midscene_pkg}"
         )
@@ -150,7 +155,7 @@ class TestNodeServiceStartup:
 
     def test_service_starts_and_pings(self):
         config = _make_dummy_config()
-        mgr = NodeServiceManager(config)
+        mgr = get_node_service(config)
         mgr.ensure_started()
 
         assert mgr.port > 0, "Service port should be > 0"
@@ -175,11 +180,11 @@ class TestNodeServiceStartup:
     def test_service_singleton(self):
         """同一 Python 进程内两次 ensure_started 应返回同一端口。"""
         config = _make_dummy_config()
-        mgr1 = NodeServiceManager(config)
+        mgr1 = get_node_service(config)
         mgr1.ensure_started()
         port1 = mgr1.port
 
-        mgr2 = NodeServiceManager(config)
+        mgr2 = get_node_service(config)
         mgr2.ensure_started()
         port2 = mgr2.port
 
@@ -190,7 +195,7 @@ class TestNodeServiceStartup:
     def test_service_survives_multiple_rpc_calls(self):
         """连续发送多次 ping，服务应保持稳定。"""
         config = _make_dummy_config()
-        mgr = NodeServiceManager(config)
+        mgr = get_node_service(config)
         mgr.ensure_started()
 
         for _ in range(5):

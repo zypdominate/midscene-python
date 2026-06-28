@@ -1,10 +1,10 @@
-"""midscene_android 异常类。"""
+"""midscene 异常类（android / web 模块共享）。"""
 
 from __future__ import annotations
 
 
 class MidsceneError(Exception):
-    """midscene_android 的基础异常。"""
+    """Midscene 的基础异常。"""
 
 
 class MidsceneNodeServiceError(MidsceneError):

@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "midscene-android"
-version = "0.0.4"
-description = "AI-powered Android automation via Midscene.js, bridged into Python"
+name = "midscene"
+version = "0.1.0"
+description = "AI-powered Android & web UI automation via Midscene.js, bridged into Python"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
@@ -37,7 +37,7 @@ Issues = "https://github.com/zypdominate/midscene-python/issues"
 Changelog = "https://github.com/zypdominate/midscene-python/blob/master/CHANGELOG.md"
 
 [project.entry-points."pytest11"]
-midscene-android = "midscene_android._pytest_plugin"
+midscene = "midscene._pytest_plugin"
 
 [project.optional-dependencies]
 dev = [
@@ -71,30 +71,13 @@ select = [
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["midscene_android"]
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["midscene_android"]
-exclude = ["midscene_android._node_driver*"]
-
-[tool.setuptools.package-data]
-midscene_android = [
-    "py.typed",
-    "_node_driver/service/package.json",
-    "_node_driver/service/service.js",
-]
-
-[tool.setuptools.exclude-package-data]
-midscene_android = [
-    "_node_driver/bin/*",
-    "_node_driver/npm/**",
-]
+known-first-party = ["midscene"]
 
 [tool.mypy]
 # mypy 1.14+ 不再支持 python_version=3.9；运行时仍兼容 3.9，此处仅用于静态检查。
 python_version = "3.10"
-files = ["src/midscene_android"]
+files = ["src/midscene"]
+mypy_path = ["src"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true

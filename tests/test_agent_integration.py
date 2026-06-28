@@ -3,7 +3,7 @@
 
 测试分三个层次，从内向外逐层覆盖：
 
-  Level 1 - 缓存与版本管理（操作真实 ~/.midscene_android/node_service 目录）
+  Level 1 - 缓存与版本管理（操作真实 ~/.midscene/android/node_service 目录）
     通过备份/还原缓存元数据，验证 _runtime.is_cache_stale / _invalidate_cache 等行为。
 
   Level 2 - Node 服务 + Agent 初始化（需要内置 Node 二进制，无需 Android 设备）
@@ -30,34 +30,41 @@ import uuid
 import pytest
 import requests
 
-from midscene_android import MidsceneNodeServiceError, runtime
-from midscene_android.config import MidsceneConfig
-from midscene_android.midscene_agent import MidsceneAgent
-from midscene_android.node_service import NodeServiceManager
+from midscene import MidsceneConfig, MidsceneNodeServiceError, runtime
+from midscene.agent_android import ANDROID_SERVICE_SPEC as SPEC
+from midscene.agent_android import MidsceneAgent
+from midscene.node_service import NodeServiceManager
 
 # ─── 标记定义 ─────────────────────────────────────────────────────────────────
 
 device_mark = pytest.mark.device
 
+
+def get_node_service(config: MidsceneConfig) -> NodeServiceManager:
+    """Android Node 服务（进程内按 spec 单例）。"""
+    return NodeServiceManager.get(SPEC, config)
+
+
+def reset_node_service() -> None:
+    """关闭并移除 Android Node 服务实例（测试隔离用）。"""
+    NodeServiceManager.reset(SPEC.name)
+
 # 缓存目录中会被 invalidate_cache 删除的元数据文件（不含 node_modules）
 _CACHE_METADATA_FILES = (
     "service.js",
     "package.json",
-    runtime.NPM_DONE_FLAG.name,
-    runtime.VERSION_FILE.name,
+    SPEC.npm_done_flag.name,
+    SPEC.version_file.name,
 )
 
 
 def _reset_singleton() -> None:
-    """在 teardown 中重置 NodeServiceManager 单例，避免测试间状态污染。"""
-    mgr = NodeServiceManager._instance
-    if mgr is not None:
-        mgr._shutdown()
-    NodeServiceManager._instance = None
+    """在 teardown 中重置 Android Node 服务实例，避免测试间状态污染。"""
+    reset_node_service()
 
 
 def _require_connected_device_id(config: MidsceneConfig) -> str:
-    mgr = NodeServiceManager(config)
+    mgr = get_node_service(config)
     mgr.ensure_started()
     resp = requests.post(
         f"http://127.0.0.1:{mgr.port}/rpc",
@@ -98,16 +105,16 @@ def node_cache_snapshot():
 
     仅备份 service.js / package.json / flag / version，不备份 node_modules。
     """
-    runtime.NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
+    SPEC.cache_dir.mkdir(parents=True, exist_ok=True)
     snapshot: dict[str, bytes | None] = {}
     for name in _CACHE_METADATA_FILES:
-        path = runtime.NODE_SVC_CACHE / name
+        path = SPEC.cache_dir / name
         snapshot[name] = path.read_bytes() if path.is_file() else None
 
     yield snapshot
 
     for name, content in snapshot.items():
-        path = runtime.NODE_SVC_CACHE / name
+        path = SPEC.cache_dir / name
         if content is None:
             path.unlink(missing_ok=True)
         else:
@@ -124,7 +131,7 @@ def node_service():
     """
     _reset_singleton()
     config = MidsceneConfig.from_env()
-    mgr = NodeServiceManager(config)
+    mgr = get_node_service(config)
     mgr.ensure_started()
     yield mgr
     _reset_singleton()
@@ -135,67 +142,67 @@ def node_service():
 
 class TestVersionCache:
     """
-    在真实 ~/.midscene_android/node_service 目录上验证缓存失效逻辑。
+    在真实 ~/.midscene/android/node_service 目录上验证缓存失效逻辑。
     每个测试通过 node_cache_snapshot fixture 在结束后还原缓存状态。
     """
 
     def test_get_current_version_returns_string(self):
         """get_current_version 应始终返回非空字符串。"""
-        ver = runtime.get_current_version()
+        ver = runtime.get_current_version(SPEC.dist_name)
         assert isinstance(ver, str)
         assert len(ver) > 0
         print(f"\n  Current package version: {ver}")
 
     def test_cache_fresh_after_ensure_node_service(self, node_cache_snapshot):
         """npm install 完成后，缓存版本应与当前包一致，视为新鲜。"""
-        runtime.ensure_node_service(runtime.get_node_bin())
-        assert runtime.NPM_DONE_FLAG.exists(), "npm install should create done flag"
-        assert runtime.VERSION_FILE.exists(), "npm install should write version file"
+        runtime.ensure_node_service(SPEC, runtime.get_node_bin())
+        assert SPEC.npm_done_flag.exists(), "npm install should create done flag"
+        assert SPEC.version_file.exists(), "npm install should write version file"
         assert (
-                runtime.VERSION_FILE.read_text(encoding="utf-8").strip()
-                == runtime.get_current_version()
+                SPEC.version_file.read_text(encoding="utf-8").strip()
+                == runtime.get_current_version(SPEC.dist_name)
         )
-        assert runtime.is_cache_stale() is False
+        assert runtime.is_cache_stale(SPEC) is False
 
     def test_cache_stale_when_install_flag_missing(self, node_cache_snapshot):
         """done flag 不存在时，缓存应被视为过期。"""
-        runtime.NPM_DONE_FLAG.unlink(missing_ok=True)
-        assert runtime.is_cache_stale() is True
+        SPEC.npm_done_flag.unlink(missing_ok=True)
+        assert runtime.is_cache_stale(SPEC) is True
 
     def test_cache_stale_when_version_file_missing(self, node_cache_snapshot):
         """done flag 存在但 version file 不存在（旧版缓存），应被视为过期。"""
-        runtime.NPM_DONE_FLAG.touch()
-        runtime.VERSION_FILE.unlink(missing_ok=True)
-        assert runtime.is_cache_stale() is True
+        SPEC.npm_done_flag.touch()
+        SPEC.version_file.unlink(missing_ok=True)
+        assert runtime.is_cache_stale(SPEC) is True
 
     def test_cache_stale_when_version_mismatch(self, node_cache_snapshot):
         """缓存版本与当前包版本不一致时，应被视为过期。"""
-        runtime.NPM_DONE_FLAG.touch()
-        runtime.VERSION_FILE.write_text("0.0.1", encoding="utf-8")
-        assert runtime.is_cache_stale() is True
+        SPEC.npm_done_flag.touch()
+        SPEC.version_file.write_text("0.0.1", encoding="utf-8")
+        assert runtime.is_cache_stale(SPEC) is True
 
     def test_invalidate_cache_removes_metadata_files(self, node_cache_snapshot):
         """invalidate_cache 应删除 service.js / package.json / flag / version。"""
-        runtime.NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
-        (runtime.NODE_SVC_CACHE / "service.js").write_text("// temp", encoding="utf-8")
-        (runtime.NODE_SVC_CACHE / "package.json").write_text("{}", encoding="utf-8")
-        runtime.NPM_DONE_FLAG.touch()
-        runtime.VERSION_FILE.write_text("0.1.0", encoding="utf-8")
+        SPEC.cache_dir.mkdir(parents=True, exist_ok=True)
+        (SPEC.cache_dir / "service.js").write_text("// temp", encoding="utf-8")
+        (SPEC.cache_dir / "package.json").write_text("{}", encoding="utf-8")
+        SPEC.npm_done_flag.touch()
+        SPEC.version_file.write_text("0.1.0", encoding="utf-8")
 
-        runtime.invalidate_cache()
+        runtime.invalidate_cache(SPEC)
 
         for name in _CACHE_METADATA_FILES:
-            assert not (runtime.NODE_SVC_CACHE / name).exists(), (
+            assert not (SPEC.cache_dir / name).exists(), (
                 f"{name} should be removed"
             )
 
     def test_invalidate_cache_preserves_node_modules(self, node_cache_snapshot):
         """invalidate_cache 必须保留 node_modules/，以便快速重装。"""
-        runtime.ensure_node_service(runtime.get_node_bin())
-        nm = runtime.NODE_SVC_CACHE / "node_modules"
+        runtime.ensure_node_service(SPEC, runtime.get_node_bin())
+        nm = SPEC.cache_dir / "node_modules"
         assert nm.is_dir(), "node_modules must exist before invalidation test"
 
-        runtime.invalidate_cache()
+        runtime.invalidate_cache(SPEC)
 
         assert nm.is_dir(), "node_modules should be preserved after cache invalidation"
 
@@ -218,14 +225,14 @@ class TestNodeServiceManagerLifecycle:
     def test_port_before_start_raises_node_service_error(self):
         """访问 .port 必须在 ensure_started() 之前抛出 MidsceneNodeServiceError。"""
         config = MidsceneConfig.from_env()
-        mgr = NodeServiceManager(config)
+        mgr = get_node_service(config)
         with pytest.raises(MidsceneNodeServiceError, match="not started"):
             _ = mgr.port
 
     def test_ensure_started_assigns_valid_port(self):
         """ensure_started() 成功后，port 应是一个合法端口号。"""
         config = MidsceneConfig.from_env()
-        mgr = NodeServiceManager(config)
+        mgr = get_node_service(config)
         mgr.ensure_started()
 
         assert isinstance(mgr.port, int)
@@ -235,14 +242,14 @@ class TestNodeServiceManagerLifecycle:
     def test_singleton_returns_same_instance(self):
         """同一 Python 进程内多次构造应返回同一实例。"""
         config = MidsceneConfig.from_env()
-        mgr1 = NodeServiceManager(config)
-        mgr2 = NodeServiceManager(config)
-        assert mgr1 is mgr2, "NodeServiceManager must be a singleton"
+        mgr1 = get_node_service(config)
+        mgr2 = get_node_service(config)
+        assert mgr1 is mgr2, "Android Node service must be a per-spec singleton"
 
     def test_ensure_started_idempotent(self):
         """多次调用 ensure_started() 不应启动多个进程，端口保持不变。"""
         config = MidsceneConfig.from_env()
-        mgr = NodeServiceManager(config)
+        mgr = get_node_service(config)
         mgr.ensure_started()
         port_first = mgr.port
 
@@ -254,7 +261,7 @@ class TestNodeServiceManagerLifecycle:
     def test_ensure_started_thread_safe(self):
         """并发调用 ensure_started() 不应导致多进程或竞态条件。"""
         config = MidsceneConfig.from_env()
-        mgr = NodeServiceManager(config)
+        mgr = get_node_service(config)
         errors: list[Exception] = []
 
         def _start_worker():
@@ -275,22 +282,22 @@ class TestNodeServiceManagerLifecycle:
     def test_service_process_is_running_after_start(self):
         """ensure_started() 后，内部 Popen 进程应处于运行状态。"""
         config = MidsceneConfig.from_env()
-        mgr = NodeServiceManager(config)
+        mgr = get_node_service(config)
         mgr.ensure_started()
 
         assert mgr._proc is not None
         assert mgr._proc.poll() is None, "Node process should still be running"
 
     def test_shutdown_clears_port_and_instance(self):
-        """_shutdown() 后，_port 应清零，单例应被清除。"""
+        """_shutdown() 后，_port 应清零，注册表中该 spec 实例应被移除。"""
         config = MidsceneConfig.from_env()
-        mgr = NodeServiceManager(config)
+        mgr = get_node_service(config)
         mgr.ensure_started()
 
         mgr._shutdown()
 
         assert mgr._port is None
-        assert NodeServiceManager._instance is None
+        assert NodeServiceManager._instances.get("android") is None
 
 
 class TestNodeServiceRPC:

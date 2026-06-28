@@ -1,3 +1,11 @@
+"""
+Node 运行时与平台 Node 服务的安装/缓存管理。
+
+与单包时代的区别：所有路径都按 :class:`ServiceSpec` 参数化，
+android / web 各自传入自己的 service 源目录与缓存命名空间，
+从而在 ``~/.midscene/<name>/node_service/`` 下并存多套 node_modules。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,40 +15,64 @@ import platform
 import shutil
 import subprocess
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import node_bootstrap
 from .exceptions import MidsceneSetupError
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("midscene.runtime")
 
-# ─── 路径常量 ──────────────────────────────────────────────────────────────────
-
-PACKAGE_DIR = Path(__file__).parent
-NODE_SERVICE_DIR = PACKAGE_DIR / "_node_driver" / "service"  # package.json + service.js
+# ─── 共享路径常量 ──────────────────────────────────────────────────────────────
 
 CACHE_DIR = node_bootstrap.CACHE_DIR
 NODE_RUNTIME_BIN = node_bootstrap.NODE_RUNTIME_BIN
 NODE_RUNTIME_NPM = node_bootstrap.NODE_RUNTIME_NPM
-NODE_SVC_CACHE = CACHE_DIR / "node_service"  # npm install 目标目录
-NPM_DONE_FLAG = NODE_SVC_CACHE / ".npm_install_done"
-VERSION_FILE = NODE_SVC_CACHE / ".package_version"  # 缓存版本戳，用于失效检测
-
-# 兼容旧引用：Node/npm 现位于用户缓存目录
-NODE_BIN_DIR = NODE_RUNTIME_BIN
-NPM_CLI = node_bootstrap.npm_cli_path(NODE_RUNTIME_NPM)
 
 NPM_INSTALL_TIMEOUT = 300  # 秒
 
 # 随 wheel 分发的 Node 服务源码（package.json 变更需重新 npm install）
 SERVICE_SOURCE_FILES = ("package.json", "service.js")
-PACKAGE_JSON_HASH_FILE = NODE_SVC_CACHE / ".package_json.sha256"
+
+
+@dataclass(frozen=True)
+class ServiceSpec:
+    """描述某个平台包的 Node 服务：源目录 + 缓存命名空间 + 版本来源。
+
+    Attributes:
+        name: 缓存命名空间，如 ``"android"`` / ``"web"``。决定缓存目录
+            ``~/.midscene/<name>/node_service/``。
+        dist_name: PyPI 发行包名（用于读取版本号做缓存失效判定）。
+        source_dir: 包内 ``_node_driver/service`` 目录（bundled package.json + service.js）。
+        label: 人类可读标签，仅用于日志/横幅，如 ``"@midscene/android"``。
+    """
+
+    name: str
+    dist_name: str
+    source_dir: Path
+    label: str = ""
+
+    @property
+    def cache_dir(self) -> Path:
+        return CACHE_DIR / self.name / "node_service"
+
+    @property
+    def npm_done_flag(self) -> Path:
+        return self.cache_dir / ".npm_install_done"
+
+    @property
+    def version_file(self) -> Path:
+        return self.cache_dir / ".package_version"
+
+    @property
+    def package_json_hash_file(self) -> Path:
+        return self.cache_dir / ".package_json.sha256"
 
 
 # ─── 平台检测 ──────────────────────────────────────────────────────────────────
 
 def get_node_bin() -> Path:
-    """返回 Node 可执行文件路径（首次使用自动下载到 ~/.midscene_android/node_runtime/）。"""
+    """返回 Node 可执行文件路径（首次使用自动下载到 ~/.midscene/node_runtime/）。"""
     path = node_bootstrap.ensure_node_runtime()
 
     if platform.system().lower() != "windows":
@@ -124,37 +156,32 @@ def ensure_node_shim(node_bin: Path) -> None:
 
 # ─── npm install ───────────────────────────────────────────────────────────────
 
-def get_current_version() -> str:
-    """返回当前已安装的 Python 包版本号。"""
+def get_current_version(dist_name: str) -> str:
+    """返回指定发行包当前已安装的版本号。"""
     try:
         from importlib.metadata import version
-        return version("midscene-android")
+        return version(dist_name)
     except Exception:
-        # 开发模式下 importlib.metadata 可能找不到包，回退到读 __version__
-        try:
-            from midscene_android import __version__
-            return __version__
-        except Exception:
-            return "unknown"
+        return "unknown"
 
 
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _bundled_package_json_hash() -> str:
-    return _sha256_file(NODE_SERVICE_DIR / "package.json")
+def _bundled_package_json_hash(spec: ServiceSpec) -> str:
+    return _sha256_file(spec.source_dir / "package.json")
 
 
-def is_bundled_source_newer_than_cache() -> bool:
+def is_bundled_source_newer_than_cache(spec: ServiceSpec) -> bool:
     """检查 _node_driver/service 中的 package.json / service.js 是否与缓存不一致。"""
     for name in SERVICE_SOURCE_FILES:
-        src = NODE_SERVICE_DIR / name
-        dst = NODE_SVC_CACHE / name
+        src = spec.source_dir / name
+        dst = spec.cache_dir / name
         if not src.is_file():
             raise MidsceneSetupError(
                 f"Missing Node service source: {src}\n"
-                "Reinstall midscene-android from PyPI."
+                f"Reinstall {spec.dist_name} from PyPI."
             )
         if not dst.is_file():
             return True
@@ -163,15 +190,15 @@ def is_bundled_source_newer_than_cache() -> bool:
     return False
 
 
-def _package_json_changed_since_install() -> bool:
+def _package_json_changed_since_install(spec: ServiceSpec) -> bool:
     """package.json 相对上次 npm install 是否有变化。"""
-    current = _bundled_package_json_hash()
-    if not PACKAGE_JSON_HASH_FILE.exists():
+    current = _bundled_package_json_hash(spec)
+    if not spec.package_json_hash_file.exists():
         return True
-    return PACKAGE_JSON_HASH_FILE.read_text(encoding="utf-8").strip() != current
+    return spec.package_json_hash_file.read_text(encoding="utf-8").strip() != current
 
 
-def is_cache_stale() -> bool:
+def is_cache_stale(spec: ServiceSpec) -> bool:
     """
     检查缓存是否需要刷新。
 
@@ -181,43 +208,43 @@ def is_cache_stale() -> bool:
     - 版本文件中记录的版本与当前包版本不一致（pip upgrade 后）
     - 内置 package.json 相对上次 install 有变化
     """
-    if not NPM_DONE_FLAG.exists():
+    if not spec.npm_done_flag.exists():
         return True
-    if not VERSION_FILE.exists():
+    if not spec.version_file.exists():
         return True
-    if _package_json_changed_since_install():
+    if _package_json_changed_since_install(spec):
         return True
     try:
-        cached_ver = VERSION_FILE.read_text(encoding="utf-8").strip()
-        return cached_ver != get_current_version()
+        cached_ver = spec.version_file.read_text(encoding="utf-8").strip()
+        return cached_ver != get_current_version(spec.dist_name)
     except OSError:
         return True
 
 
-def sync_node_service_sources() -> None:
+def sync_node_service_sources(spec: ServiceSpec) -> None:
     """将 _node_driver/service 源码同步到缓存目录（不触发 npm install）。"""
-    NODE_SVC_CACHE.mkdir(parents=True, exist_ok=True)
+    spec.cache_dir.mkdir(parents=True, exist_ok=True)
     for name in SERVICE_SOURCE_FILES:
-        src = NODE_SERVICE_DIR / name
-        dst = NODE_SVC_CACHE / name
+        src = spec.source_dir / name
+        dst = spec.cache_dir / name
         shutil.copy2(src, dst)
         logger.debug("Synced %s → %s", src.name, dst)
 
 
-def sync_node_service_sources_if_needed() -> bool:
+def sync_node_service_sources_if_needed(spec: ServiceSpec) -> bool:
     """
     若 bundled 源码比缓存新或内容不同，则同步。
 
     Returns:
         True 表示发生了同步。
     """
-    if not is_bundled_source_newer_than_cache():
+    if not is_bundled_source_newer_than_cache(spec):
         return False
-    sync_node_service_sources()
+    sync_node_service_sources(spec)
     return True
 
 
-def invalidate_cache() -> None:
+def invalidate_cache(spec: ServiceSpec) -> None:
     """
     清除缓存中的 Node 服务文件（保留 node_modules 以加速重装）。
 
@@ -227,11 +254,11 @@ def invalidate_cache() -> None:
     for name in (
         "service.js",
         "package.json",
-        NPM_DONE_FLAG.name,
-        VERSION_FILE.name,
-        PACKAGE_JSON_HASH_FILE.name,
+        spec.npm_done_flag.name,
+        spec.version_file.name,
+        spec.package_json_hash_file.name,
     ):
-        target = NODE_SVC_CACHE / name
+        target = spec.cache_dir / name
         try:
             target.unlink(missing_ok=True)
             logger.debug("Cache invalidated: removed %s", name)
@@ -239,9 +266,9 @@ def invalidate_cache() -> None:
             logger.warning("Failed to remove cache file %s: %s", name, e)
 
 
-def ensure_node_service(node_bin: Path) -> None:
+def ensure_node_service(spec: ServiceSpec, node_bin: Path) -> None:
     """
-    确保 Node 服务依赖已安装到缓存目录，并与当前包版本一致。
+    确保某平台的 Node 服务依赖已安装到缓存目录，并与当前包版本一致。
 
     - 每次运行先检查 bundled package.json / service.js 是否最新并同步
     - 首次运行：执行完整的 npm install
@@ -249,29 +276,28 @@ def ensure_node_service(node_bin: Path) -> None:
     - 无变化：跳过 install
     """
     ensure_node_shim(node_bin)
-    sync_node_service_sources_if_needed()
+    sync_node_service_sources_if_needed(spec)
 
-    if not is_cache_stale():
+    if not is_cache_stale(spec):
         logger.debug(
             "Node service cache is up-to-date (v%s), skipping install. cache=%s",
-            get_current_version(),
-            NODE_SVC_CACHE,
+            get_current_version(spec.dist_name),
+            spec.cache_dir,
         )
         return
 
-    current_version = get_current_version()
-    invalidate_cache()
-    sync_node_service_sources()
+    current_version = get_current_version(spec.dist_name)
+    invalidate_cache(spec)
+    sync_node_service_sources(spec)
 
     print_banner(
-        "Setting up @midscene/android Node service",
+        f"Setting up {spec.label or spec.dist_name} Node service",
         f"Package version : {current_version}",
-        f"Target          : {NODE_SVC_CACHE}",
+        f"Target          : {spec.cache_dir}",
         f"Node            : {node_bin}",
         "This may take a few minutes (requires npm registry access).",
     )
 
-    # 缓存 Node + npm（~/.midscene_android/node_runtime/），PATH 置顶确保不走系统 node/npm
     npm_cli = get_npm_cli()
     cmd = [str(node_bin), str(npm_cli), "install", "--omit=dev"]
     env = make_node_env(node_bin)
@@ -280,16 +306,16 @@ def ensure_node_service(node_bin: Path) -> None:
 
     run_subprocess(
         cmd,
-        cwd=NODE_SVC_CACHE,
+        cwd=spec.cache_dir,
         timeout=NPM_INSTALL_TIMEOUT,
         error_prefix="npm install failed",
         env=env,
     )
 
-    NPM_DONE_FLAG.touch()
-    VERSION_FILE.write_text(current_version, encoding="utf-8")
-    PACKAGE_JSON_HASH_FILE.write_text(_bundled_package_json_hash(), encoding="utf-8")
-    print(f"[midscene-android] npm install completed (v{current_version}).", flush=True)
+    spec.npm_done_flag.touch()
+    spec.version_file.write_text(current_version, encoding="utf-8")
+    spec.package_json_hash_file.write_text(_bundled_package_json_hash(spec), encoding="utf-8")
+    print(f"[midscene] npm install completed for {spec.name} (v{current_version}).", flush=True)
 
 
 def run_subprocess(
@@ -343,5 +369,5 @@ def print_banner(*lines: str) -> None:
     sep = "=" * 60
     print(f"\n{sep}", flush=True)
     for line in lines:
-        print(f"[midscene-android] {line}", flush=True)
+        print(f"[midscene] {line}", flush=True)
     print(f"{sep}\n", flush=True)
