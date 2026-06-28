@@ -3,7 +3,37 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 格式，
 并采用 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.1.0] - 2026-06-28
+
+首个以 **`midscene`** 名义发布到 PyPI 的版本：Android 与 Web 自动化合并为单一包，内部按模块划分，同时新增网页自动化能力。
+
+### 新增
+
+- **网页自动化**：`MidsceneWebAgent(BaseAgent)`，支持 `goto` / `new_tab` / `set_viewport` / `ai_hover` 及全部跨平台 `ai_*` 方法。
+- **Web 驱动抽象**（`drivers.py`）：默认 `PuppeteerDriver`（`@midscene/web` + puppeteer）；`PlaywrightDriver` / `BridgeDriver` 占位预留。
+- **共享底层模块**（`src/midscene/` 扁平布局）：`BaseAgent`、`ServiceSpec` 参数化运行时、进程级多实例 `NodeServiceManager`、pytest 共享支持（`_pytest_support`）。
+- **pytest 插件扩展**：合并为单一入口 `midscene._pytest_plugin`，新增 `midscene_web_agent` fixture 及 `--midscene-url` / `--midscene-headed` CLI 选项。
+- 单 wheel 同时打包 Android / Web 两套 Node 服务源码（`_node_driver/android/service`、`_node_driver/web/service`），npm 依赖仍按平台懒安装。
+
+### 变更
+
+- **包名与导入路径（破坏性）**：PyPI 包名由 `midscene-android` 改为 **`midscene`**（`pip install midscene`，`import midscene`）；`from midscene_android import ...` 不再可用。
+- **运行时缓存目录**：由 `~/.midscene_android/` 统一迁移至 `~/.midscene/`（`node_runtime/` 共享，`android/` / `web/` 各自 `node_service/`）。
+- **`NodeServiceManager`**：由全局单例改为按 `ServiceSpec.name` 键控的多实例注册表，Android 与 Web 可并存、互不干扰。
+- 构建/发布脚本（`build_wheel.py` / `upload_pypi.py`）回归单包；CI 合并为单 `test` 矩阵 + `build` 任务，缓存路径更新为 `~/.midscene`。
+- 移除 monorepo 结构（`packages/midscene-core` / `midscene-android` / `midscene-web`）及 Android 兼容 shim 模块。
+
+### 修复
+
+- **`.env` 加载路径**：`MidsceneConfig` 改用 `find_dotenv(usecwd=True)` 从业务工程工作目录向上查找 `.env`，修复 pip 安装后在 pytest 等场景下配置变量读不到的问题（裸 `load_dotenv()` 会从 `site-packages/midscene/` 向上搜索）。
+- 创建 `MidsceneConfig` 时按当前 cwd 重新加载 `.env`，避免仅在 `import midscene` 时加载失败。
+
+### 文档
+
+- README 更新为单包说明，补充 Web 自动化用法、pytest 双 fixture 及 `src/midscene/` 项目结构。
+- CHANGELOG 记录包合并与 Web 新特性。
+
+## [0.0.4] - 2026-06-20
 
 ### 新增
 
@@ -124,7 +154,12 @@
 
 - 初始 README 与项目说明。
 
-[0.0.4]: https://github.com/zypdominate/midscene-python/compare/v0.0.4...HEAD
+[0.1.0]: https://github.com/zypdominate/midscene-python/compare/v0.0.4...v0.1.0
+
+[0.0.4]: https://github.com/zypdominate/midscene-python/compare/v0.0.3...v0.0.4
+
 [0.0.3]: https://github.com/zypdominate/midscene-python/releases/tag/v0.0.3
-[0.0.2]: https://github.com/zypdominate/midscene-python/compare/v0.1.0...v0.0.1
+
+[0.0.2]: https://github.com/zypdominate/midscene-python/compare/v0.0.1...v0.0.2
+
 [0.0.1]: https://github.com/zypdominate/midscene-python/releases/tag/v0.0.1
