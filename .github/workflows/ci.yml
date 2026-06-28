@@ -44,11 +44,13 @@ jobs:
       matrix:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
     env:
-      # 非 device 测试只需启动 Node 服务，不会发起真实 AI 调用，这里用占位配置。
+      # 非 device/web 测试只需启动 Node 服务，不会发起真实 AI 调用，这里用占位配置。
       MIDSCENE_MODEL_BASE_URL: https://example.com/v1
       MIDSCENE_MODEL_API_KEY: ci-dummy-key
       MIDSCENE_MODEL_NAME: ci-dummy-model
       MIDSCENE_MODEL_FAMILY: openai
+      # web 服务 ping 测试不启动浏览器，跳过 Chromium 下载以加速 npm install。
+      PUPPETEER_SKIP_DOWNLOAD: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -57,14 +59,14 @@ jobs:
       - name: Cache Node runtime & service
         uses: actions/cache@v4
         with:
-          path: ~/.midscene_android
-          key: midscene-${{ runner.os }}-node22-${{ hashFiles('src/midscene_android/_node_driver/service/package.json') }}
+          path: ~/.midscene
+          key: midscene-${{ runner.os }}-node22-${{ hashFiles('src/midscene/_node_driver/**/service/package.json') }}
           restore-keys: |
             midscene-${{ runner.os }}-node22-
       - name: Install package
         run: pip install -e ".[dev]"
-      - name: Run tests (no device)
-        run: pytest tests/ -m "not device" -v
+      - name: Run tests (no device, no browser)
+        run: pytest tests/ -m "not device and not web" -v
 
   build:
     name: Build & check distribution
@@ -75,7 +77,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install build twine
-      - run: python -m build
+      - name: Build distribution
+        run: python tools/build_wheel.py --clean
       - run: twine check dist/*
       - uses: actions/upload-artifact@v4
         with:

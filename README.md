@@ -1,7 +1,7 @@
 # Midscene Python
 
-[![PyPI version](https://img.shields.io/pypi/v/midscene-android.svg)](https://pypi.org/project/midscene-android/)
-[![Python](https://img.shields.io/pypi/pyversions/midscene-android.svg)](https://pypi.org/project/midscene-android/)
+[![PyPI version](https://img.shields.io/pypi/v/midscene.svg)](https://pypi.org/project/midscene/)
+[![Python](https://img.shields.io/pypi/pyversions/midscene.svg)](https://pypi.org/project/midscene/)
 [![CI](https://github.com/zypdominate/midscene-python/actions/workflows/ci.yml/badge.svg)](https://github.com/zypdominate/midscene-python/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
