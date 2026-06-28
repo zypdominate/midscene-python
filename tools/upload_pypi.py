@@ -3,7 +3,7 @@
 检查 dist/ 中的发行包并上传到 PyPI / TestPyPI。
 
 包地址
-https://pypi.org/project/midscene-android/#history
+https://pypi.org/project/midscene/#history
 
 在 build_wheel.py 构建完成后使用：
 
@@ -90,7 +90,7 @@ def validate_artifacts(
 
 
 def read_project_meta() -> tuple[str, str]:
-    """从 pyproject.toml 读取 (name, version)。"""
+    """从根 pyproject.toml 读取 (name, version)。"""
     text = PYPROJECT.read_text(encoding="utf-8")
     name_m = re.search(r'^name\s*=\s*"([^"]+)"', text, re.MULTILINE)
     version_m = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
@@ -346,10 +346,7 @@ def main() -> None:
 
     artifacts = find_artifacts(dist_dir, dist_name, version)
     try:
-        files = validate_artifacts(
-            artifacts,
-            require_all=args.require_all,
-        )
+        files = validate_artifacts(artifacts, require_all=args.require_all)
     except (FileNotFoundError, ValueError) as exc:
         print(f"\n错误: {exc}", file=sys.stderr)
         sys.exit(1)

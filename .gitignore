@@ -1,7 +1,9 @@
-# Node 二进制（体积大，不提交 git，由开发者脚本下载后打包进 wheel）
-src/midscene_android/_node_driver/bin/node-*
-src/midscene_android/_node_driver/bin/node.exe
-src/midscene_android/_node_driver/npm/
+# Node 运行时（体积大，运行时下载到用户缓存，不提交、不打包）
+~/.midscene/
+
+# 误生成在仓库内的 Node 服务日志（含轮转 .1）
+**/midscene_service.log*
+**/midscene_web_service.log*
 
 # Python 构建产物
 dist/
@@ -10,9 +12,11 @@ build/
 __pycache__/
 *.pyc
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# 用户缓存（运行时生成）
-~/.midscene_android/
+# 测试失败产物（截图/报告）
+midscene_artifacts/
 
 # 虚拟环境
 .venv/

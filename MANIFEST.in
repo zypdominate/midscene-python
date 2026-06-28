@@ -1,8 +1,0 @@
-# sdist：仅包含 service 源码，排除 Node/npm 大文件
-graft src/midscene_android/_node_driver/service
-prune src/midscene_android/_node_driver/bin
-prune src/midscene_android/_node_driver/npm
-global-exclude node-*
-
-include README.md
-include pyproject.toml

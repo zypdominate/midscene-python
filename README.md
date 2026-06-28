@@ -1,13 +1,23 @@
-# midscene-android
+# Midscene Python
 
 [![PyPI version](https://img.shields.io/pypi/v/midscene-android.svg)](https://pypi.org/project/midscene-android/)
 [![Python](https://img.shields.io/pypi/pyversions/midscene-android.svg)](https://pypi.org/project/midscene-android/)
 [![CI](https://github.com/zypdominate/midscene-python/actions/workflows/ci.yml/badge.svg)](https://github.com/zypdominate/midscene-python/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-将 [Midscene.js](https://github.com/web-infra-dev/midscene) AI 驱动的 Android 自动化能力桥接到 Python 测试框架。
+将 [Midscene.js](https://github.com/web-infra-dev/midscene) AI 驱动的 UI 自动化能力桥接到 Python 测试框架。
 
 无需自行安装 Node.js；无需维护 UI 选择器——用自然语言描述操作，AI 负责定位和执行。
+
+单一 `midscene` 包，工程代码按模块划分，同时支持：
+
+| 模块 | 能力 | 入口 |
+|------|------|------|
+| `agent_android` | Android 自动化（ADB + `@midscene/android`） | `from midscene import MidsceneAgent` |
+| `agent_web` / `drivers` | 网页自动化（Puppeteer + `@midscene/web`，预留 Playwright/Bridge） | `from midscene import MidsceneWebAgent` |
+| 共享底层 | 配置、异常、Node 运行时桥接、RPC 服务管理、`BaseAgent` | `from midscene import MidsceneConfig, BaseAgent` |
+
+> 本 README 以 Android 为主线说明；网页用法见 [网页自动化](#网页自动化)。
 
 ---
 
@@ -16,6 +26,7 @@
 - [架构](#架构)
 - [安装](#安装)
 - [快速开始](#快速开始)
+- [网页自动化](#网页自动化)
 - [pytest 插件](#pytest-插件)
 - [配置](#配置)
 - [API 参考](#api-参考)
@@ -32,17 +43,19 @@ Python 测试代码
     │
     │  JSON-RPC 2.0（本地回环，无网络开销）
     ▼
-Node.js 微服务（进程级单例，首次使用自动启动）
-├── 内置 Node 二进制  ← 随 wheel 分发，无需用户安装 Node
-├── @midscene/android ← 首次使用时自动 npm install 到缓存
-│     └── AI 视觉模型（调用你配置的 API Key）
-└── ADB
-      └── Android 设备 / 模拟器
+midscene（共享底层）
+├── Node 运行时（首次使用自动下载到 ~/.midscene/node_runtime/，android/web 共享）
+├── NodeServiceManager（按平台 ServiceSpec 多实例：android / web 各一个 Node 进程）
+└── BaseAgent（跨平台 ai_action / ai_tap / ai_query / ai_assert …）
+        │
+        ├── MidsceneAgent     → @midscene/android → ADB → Android 设备 / 模拟器
+        └── MidsceneWebAgent  → @midscene/web → Puppeteer → Chromium 浏览器
 ```
 
 **关键特性：**
 
-- Python 进程与 Node 进程 1:1，多个 `MidsceneAgent` 共享同一 Node 进程（通过 sessionId 隔离）
+- 每个平台的 Python 进程与其 Node 进程 1:1；同平台多个 Agent 共享一个 Node 进程（通过 sessionId 隔离）
+- android 与 web 各自拥有独立的 Node 服务与缓存命名空间，可并存
 - Python 进程退出时 Node 子进程自动清理
 - 无需系统已安装 `node` 或 `npm`
 
@@ -51,10 +64,10 @@ Node.js 微服务（进程级单例，首次使用自动启动）
 ## 安装
 
 ```bash
-pip install midscene-android
+pip install midscene
 ```
 
-> **首次使用**：会自动执行 `npm install @midscene/android`，需要访问 npm registry，约需 1～2 分钟。之后版本升级时会自动重新安装，无需手动干预。
+> **首次使用**：会按需自动执行 `npm install`（Android 用 `@midscene/android`，Web 用 `@midscene/web` + puppeteer），需要访问 npm registry。只有实际使用的平台才会触发对应安装。
 
 **系统要求：**
 
@@ -84,7 +97,7 @@ MIDSCENE_MODEL_FAMILY=doubao-seed
 ### 2. 编写测试
 
 ```python
-from midscene_android import MidsceneAgent
+from midscene import MidsceneAgent
 
 # 从 .env 或环境变量自动读取配置
 agent = MidsceneAgent("emulator-5556")
@@ -104,7 +117,7 @@ with MidsceneAgent("emulator-5556") as agent:
 ```python
 # conftest.py
 import pytest
-from midscene_android import MidsceneAgent
+from midscene import MidsceneAgent
 
 @pytest.fixture
 def agent():
@@ -124,9 +137,41 @@ def test_login(agent: MidsceneAgent):
 
 ---
 
+## 网页自动化
+
+网页自动化由 `MidsceneWebAgent` 提供，默认使用 Puppeteer 驱动（首次使用会自动安装 `@midscene/web` 与 puppeteer，并下载 Chromium）。
+
+```python
+from midscene import MidsceneWebAgent
+
+agent = MidsceneWebAgent("https://example.com")
+agent.ai_action("在搜索框输入 midscene 并回车")
+agent.ai_assert("搜索结果已展示")
+agent.destroy()
+```
+
+选择 / 配置驱动：
+
+```python
+from midscene import MidsceneWebAgent, PuppeteerDriver
+
+# 有头模式 + 指定视口
+agent = MidsceneWebAgent(
+    "https://example.com",
+    driver=PuppeteerDriver(headless=False, viewport={"width": 1440, "height": 900}),
+)
+
+# 连接已运行的 Chrome（chrome --remote-debugging-port=9222）
+agent = MidsceneWebAgent(driver=PuppeteerDriver(cdp_endpoint="http://127.0.0.1:9222"))
+```
+
+网页专有方法：`goto(url)`、`new_tab(url=None)`、`set_viewport(width, height)`、`ai_hover(locate)`，以及全部跨平台 `ai_*` 方法。`PlaywrightDriver` / `BridgeDriver` 为占位，后续接入。
+
+---
+
 ## pytest 插件
 
-安装 `midscene-android` 后，pytest 会**自动加载**内置插件，无需额外配置。
+安装 `midscene` 后，pytest 会**自动加载**内置插件，无需额外配置。提供 `midscene_agent`（Android）与 `midscene_web_agent`（Web）两个 fixture。
 
 ### 内置 fixture：`midscene_agent`
 
@@ -179,8 +224,19 @@ pytest --midscene-artifact-dir /tmp/ci_artifacts tests/ -m device
 
 | 选项 | 默认值 | 说明 |
 |------|--------|------|
-| `--midscene-device` | 自动检测 | Android 设备 ID |
+| `--midscene-device` | 自动检测 | `midscene_agent` 使用的 Android 设备 ID |
+| `--midscene-url` | 无 | `midscene_web_agent` 的起始页面 URL（或 `MIDSCENE_WEB_URL`） |
+| `--midscene-headed` | 关闭 | `midscene_web_agent` 以有头模式启动浏览器 |
 | `--midscene-artifact-dir` | `midscene_artifacts/` | 失败截图与报告的保存目录 |
+
+`midscene_web_agent` 用法：
+
+```python
+def test_search(midscene_web_agent):
+    midscene_web_agent.goto("https://example.com")
+    midscene_web_agent.ai_action("点击更多信息链接")
+    midscene_web_agent.ai_assert("页面已跳转")
+```
 
 ---
 
@@ -191,7 +247,7 @@ pytest --midscene-artifact-dir /tmp/ci_artifacts tests/ -m device
 可以通过环境变量、`.env` 文件或代码直接传入配置：
 
 ```python
-from midscene_android import MidsceneAgent, MidsceneConfig
+from midscene import MidsceneAgent, MidsceneConfig
 
 # 方式一：从 .env / 环境变量自动读取（推荐）
 agent = MidsceneAgent("emulator-5556")
@@ -358,7 +414,7 @@ output = agent.run_adb_shell("pm list packages | grep com.example", timeout_ms=5
 ## 异常处理
 
 ```python
-from midscene_android import MidsceneRPCError
+from midscene import MidsceneRPCError
 
 try:
     agent.ai_assert("某个不存在的条件")
@@ -388,69 +444,71 @@ except MidsceneRPCError as e:
 ### 本地开发
 
 ```bash
-git clone <repo>
+git clone https://github.com/zypdominate/midscene-python
 cd midscene_python
 
-# 安装开发依赖
+# 以可编辑方式安装（含开发工具）
 pip install -e ".[dev]"
 
-# 首次运行测试会自动下载 Node 到 ~/.midscene_android/node_runtime/
-# 可选：预下载到 src/ 目录（纯离线 git 开发）
-python tools/fetch_node_binaries.py --platform win32-x64
+# 首次运行测试会自动下载 Node 到 ~/.midscene/node_runtime/
 ```
+
+根目录 `pyproject.toml` 同时承载打包元数据与 ruff / pytest / mypy 配置，并把 `src` 加入 `pythonpath`，因此在根目录直接执行 `pytest` / `ruff check .` / `mypy` 即可。
 
 ### 运行测试
 
 ```bash
-# 集成测试（无需 Android 设备；首次需联网）
-pytest tests/ -m "not device" -v
+# 全部非真机/非浏览器测试（首次需联网下载 Node + npm 依赖）
+pytest -m "not device and not web" -v
 
 # 需要真实 Android 设备的测试（需配置好 .env 并连接设备）
 pytest tests/ -m device -v -s
+
+# 需要真实浏览器 + AI Key 的网页测试
+pytest tests/ -m web -v -s
 ```
 
-### 构建发行包
+### 构建与发布
 
 ```bash
+# 构建 py3-none-any wheel + sdist
 python tools/build_wheel.py --clean
 
-# dist/ 示例：
-# midscene_android-0.0.3-py3-none-any.whl
-# midscene_android-0.0.3.tar.gz
+# 检查并上传 PyPI
+python tools/upload_pypi.py --dry-run
+python tools/upload_pypi.py --require-all --yes
 ```
-
-上传 PyPI 见 [RELEASE_GUIDE.md](RELEASE_GUIDE.md)。
 
 ### 项目结构
 
 ```
-src/midscene_android/
-├── __init__.py
-├── config.py            # MidsceneConfig（环境变量 / .env 支持）
-├── midscene_agent.py    # MidsceneAgent（所有 AI 操作方法）
-├── node_bootstrap.py    # 首次运行从 nodejs.org 下载 Node/npm
-├── node_service.py      # NodeServiceManager（进程级单例）
-├── runtime.py           # Node 二进制管理、npm install、版本缓存
+src/midscene/
+├── __init__.py            # 顶层导出（MidsceneAgent / MidsceneWebAgent / 驱动 / 异常 …）
+├── config.py              # MidsceneConfig（环境变量 / .env 支持）
 ├── exceptions.py
+├── node_bootstrap.py      # 首次运行从 nodejs.org 下载 Node/npm
+├── runtime.py             # ServiceSpec + 按平台参数化的 npm install / 缓存
+├── node_service.py        # NodeServiceManager（按 spec 名称多实例）
+├── base_agent.py          # BaseAgent（跨平台 ai_* 方法 + RPC）
+├── agent_android.py       # MidsceneAgent(BaseAgent) + 设备/系统方法
+├── agent_web.py           # MidsceneWebAgent(BaseAgent) + goto/new_tab/set_viewport
+├── drivers.py             # PuppeteerDriver（实现）+ Playwright/Bridge（占位）
+├── _pytest_plugin.py      # midscene_agent / midscene_web_agent fixture + pytest11 入口
+├── _pytest_support.py     # pytest 插件共享逻辑（失败截图/报告）
+├── py.typed
 └── _node_driver/
-    └── service/         # 随 pip 包分发（package.json + service.js）
-        ├── service.js   # Node.js RPC 服务（JSON-RPC 2.0）
-        └── package.json # @midscene/android 依赖声明
+    ├── android/service/   # package.json(@midscene/android) + service.js
+    └── web/service/       # package.json(@midscene/web + puppeteer) + service.js
 
-# 运行时缓存（不在 pip 包内）：
-# ~/.midscene_android/node_runtime/   ← Node + npm
-# ~/.midscene_android/node_service/   ← npm install @midscene/android
+# 运行时缓存（不在 pip 包内，android/web 共享 Node 运行时）：
+# ~/.midscene/node_runtime/          ← Node + npm
+# ~/.midscene/android/node_service/  ← npm install @midscene/android
+# ~/.midscene/web/node_service/      ← npm install @midscene/web + puppeteer
 
-tests/
-├── conftest.py
-├── test_node_service.py        # Node 二进制与服务启动测试
-├── test_agent_integration.py   # 集成测试（Level 1/2 无需设备，Level 3 需要设备）
-└── test_example_integration.py # 示例集成测试
-
+tests/                     # Android + Web 测试集中在根目录
 tools/
-├── fetch_node_binaries.py   # 可选：预填 src/_node_driver（开发用）
-├── build_wheel.py           # 构建 py3-none-any wheel + sdist
-└── upload_pypi.py           # 检查 dist/ 并上传 PyPI
+├── build_wheel.py         # 构建 py3-none-any wheel + sdist
+└── upload_pypi.py         # 检查 dist/ 并上传 PyPI
 ```
 
 ---
