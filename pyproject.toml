@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [{ name = "zypdominate" }]
-keywords = ["android", "automation", "testing", "ai", "midscene"]
+keywords = ["android", "web", "browser", "puppeteer", "automation", "testing", "ai", "midscene"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -24,10 +24,18 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-    "pytest>=8.4.2",
     "python-dotenv>=1.2.1",
     "requests>=2.28",
-    "setuptools>=82.0.1",
+    "pytest>=8.4.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "twine",
+    "ruff",
+    "mypy",
+    "types-requests",
 ]
 
 [project.urls]
@@ -39,20 +47,25 @@ Changelog = "https://github.com/zypdominate/midscene-python/blob/master/CHANGELO
 [project.entry-points."pytest11"]
 midscene = "midscene._pytest_plugin"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "pytest-mock",
-    "build",
-    "twine",
-    "ruff",
-    "mypy",
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["midscene"]
+
+[tool.setuptools.package-data]
+midscene = [
+    "py.typed",
+    "_node_driver/android/service/package.json",
+    "_node_driver/android/service/service.js",
+    "_node_driver/web/service/package.json",
+    "_node_driver/web/service/service.js",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
 markers = [
     "device: tests that require a real Android device connected via ADB and a valid AI Key",
+    "web: tests that drive a real browser (Chromium via puppeteer) and require a valid AI Key",
 ]
 
 [tool.ruff]

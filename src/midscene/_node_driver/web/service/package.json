@@ -1,0 +1,14 @@
+{
+  "name": "midscene-web-service",
+  "version": "0.1.0",
+  "description": "Local JSON-RPC bridge service for midscene-web Python package",
+  "main": "service.js",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@midscene/web": "1.8.7",
+    "puppeteer": "23.11.1"
+  }
+}
